@@ -326,7 +326,7 @@ app.post('/api/x/parse', async (req, res) => {
 
                 // Build article text from available fields
                 const articleParts = [];
-                if (art.title) articleParts.push(`# ${String(art.title)}`);
+                if (art.title) articleParts.push(String(art.title));
                 if (art.preview_text) articleParts.push(String(art.preview_text));
 
                 // Handle content field - could be string (HTML/markdown), object, or array
@@ -577,6 +577,17 @@ app.post('/api/x/parse', async (req, res) => {
       }
     }
 
+    // Extract article title if available
+    let articleTitle = '';
+    // Check if tweetText starts with a title line (from FxTwitter article)
+    if (tweetText.includes('\n\n')) {
+      const firstLine = tweetText.split('\n\n')[0];
+      // If first line looks like a title (short, no URLs)
+      if (firstLine.length < 200 && !firstLine.match(/https?:\/\//)) {
+        articleTitle = firstLine;
+      }
+    }
+
     res.json({
       success: true,
       tweet: {
@@ -586,7 +597,8 @@ app.post('/api/x/parse', async (req, res) => {
         hasVideo,
         url,
         parseMethod,
-        fetchedContent: fetchedUrlContent
+        fetchedContent: fetchedUrlContent,
+        articleTitle: articleTitle
       }
     });
   } catch (error) {
@@ -735,10 +747,10 @@ app.post('/api/gemini/summarize', async (req, res) => {
 - 嚴禁捏造、幻想或編造任何不在原始內容中的資訊
 - 只能根據下方提供的原始內容進行整理，不可以自行補充你認為可能的內容
 - 如果原始內容太少無法整理成有意義的筆記，就直接輸出：「⚠️ 原始內容不足，無法生成完整筆記。」並附上原始內容
-- 直接以 Markdown 格式輸出筆記內容
+- ⚠️ 嚴格輸出限制：必須『只』輸出筆記內容，絕對不可以使用 markdown 的 code block（也就是不要用 \`\`\` 包起來）。
 
 格式要求：
-1. 使用 Markdown 格式
+1. 使用 Markdown 格式（如標題 #、粗體 **、列表 -）來讓閱讀更清晰
 2. 包含重點摘要
 3. 列出關鍵要點
 4. 如果有技術內容，請適當解釋
@@ -750,7 +762,7 @@ app.post('/api/gemini/summarize', async (req, res) => {
 ${content}
 ---
 
-請直接根據上述原始內容輸出整理好的 Markdown 筆記（禁止編造內容）：`;
+請直接根據上述原始內容輸出整理好的 Markdown 筆記（嚴禁編造內容，嚴禁使用 \`\`\` 包裝）：`;
 
     const model = settings.geminiModel || 'gemma-3-27b-it';
     const geminiRes = await fetch(
@@ -771,7 +783,10 @@ ${content}
     }
 
     const data = await geminiRes.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    // Clean up: remove markdown code block markers if present
+    text = text.replace(/^```(?:markdown)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
     res.json({ success: true, text });
   } catch (error) {
@@ -858,21 +873,17 @@ app.post('/api/podcast/generate-script', async (req, res) => {
     const settings = getSettings();
     if (!settings.geminiApiKey) return res.status(400).json({ error: '請先設定 Gemini API Key' });
 
-    const prompt = `你是一位專業的 Podcast 講稿撰寫者。請根據以下筆記內容，撰寫一份兩位主持人的 Podcast 講稿。
+    const prompt = `請將以下貼文內容改寫為 Podcast 雙人對談腳本。
+主持人為曉曉 (host_f，女，活潑好奇) 與雲健 (host_m，男，沉穩專業)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。
+⚠️ 嚴格輸出限制：你必須『只』輸出一個 Python List 格式，不要包含 Markdown 標記 (如 \`\`\`python )，不要前言結語。格式範例：
+[
+    ("host_f", "大家好..."),
+    ("host_m", "沒錯...")
+]
 
-規則：
-1. 兩位主持人分別為「小明」和「小華」
-2. 語言使用繁體中文，口語化、自然
-3. 對話要有互動感，包含提問、回應、補充
-4. 開頭要有引言介紹主題，結尾要有總結
-5. 每段對話標注說話者，格式為「小明：...」或「小華：...」
-6. 內容要有教育性但保持輕鬆有趣
-7. 長度約 5-10 分鐘的對話量
-8. 不要加入舞台指示或音效標記
+內容標題：${noteTitle || '未命名'}
 
-筆記標題：${noteTitle || '未命名'}
-
-筆記內容：
+以下是需要改寫的內容：
 ${noteContents}`;
 
     const model = settings.geminiModel || 'gemma-3-27b-it';
@@ -891,7 +902,10 @@ ${noteContents}`;
     if (!geminiRes.ok) throw new Error(`Gemini API 錯誤: ${geminiRes.status}`);
 
     const data = await geminiRes.json();
-    const script = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    let script = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    // Clean up: remove markdown code block markers if present
+    script = script.replace(/^```(?:python)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
     res.json({ success: true, script });
   } catch (error) {
@@ -900,7 +914,7 @@ ${noteContents}`;
   }
 });
 
-// ─── Podcast: Generate Audio ─────────────────────────────────
+// ─── Podcast: Generate Audio (Kokoro generate_podcast API) ───
 app.post('/api/podcast/generate-audio', async (req, res) => {
   try {
     const { script, title } = req.body;
@@ -909,91 +923,71 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     const settings = getSettings();
     const podcastId = Date.now().toString();
 
-    // Parse script into segments by speaker
-    const lines = script.split('\n').filter(l => l.trim());
-    const segments = [];
-
-    for (const line of lines) {
-      const speakerMatch = line.match(/^(小明|小華)[：:]\s*(.*)/);
-      if (speakerMatch) {
-        segments.push({
-          speaker: speakerMatch[1],
-          text: speakerMatch[2].trim()
-        });
+    // Parse the Python List script into a JS array for the API
+    let scriptData;
+    try {
+      // Convert Python tuple format to JSON array format
+      // ("host_f", "text") -> ["host_f", "text"]
+      const jsonStr = script
+        .replace(/\(/g, '[')
+        .replace(/\)/g, ']')
+        .replace(/'/g, '"');
+      scriptData = JSON.parse(jsonStr);
+    } catch (parseErr) {
+      console.error('Script parse error, trying regex extraction:', parseErr.message);
+      // Fallback: extract tuples using regex
+      scriptData = [];
+      const tupleRegex = /\(\s*["'](\w+)["']\s*,\s*["']((?:[^"'\\]|\\.)*)["']\s*\)/g;
+      let match;
+      while ((match = tupleRegex.exec(script)) !== null) {
+        scriptData.push([match[1], match[2].replace(/\\"/g, '"').replace(/\\'/g, "'")]);
       }
     }
 
-    if (segments.length === 0) {
-      // Fallback: treat entire script as single segment
-      segments.push({ speaker: '小明', text: script });
+    if (!scriptData || scriptData.length === 0) {
+      throw new Error('無法解析講稿格式，請確認為 Python List 格式');
     }
 
-    // Generate audio for each segment using Kokoro API
-    const audioFiles = [];
+    // Generate filename from title
+    const filename = (title || 'podcast')
+      .replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')
+      .replace(/_+/g, '_')
+      .substring(0, 50) || 'podcast';
 
-    for (let i = 0; i < segments.length; i++) {
-      const seg = segments[i];
-      const segFile = path.join(AUDIO_DIR, `${podcastId}_seg${i}.wav`);
+    console.log(`Sending to Kokoro: filename=${filename}, segments=${scriptData.length}`);
 
-      // Map speakers to different voices
-      const voice = seg.speaker === '小明' ? 'zf_xiaobei' : 'zf_xiaoni';
+    // Send to Kokoro generate_podcast API
+    const kokoroRes = await fetch(`${settings.kokoroUrl}/generate_podcast`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: filename,
+        script: scriptData
+      })
+    });
 
-      try {
-        const kokoroRes = await fetch(`${settings.kokoroUrl}/v1/audio/speech`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model: 'kokoro',
-            input: seg.text,
-            voice: voice,
-            response_format: 'wav'
-          })
-        });
-
-        if (!kokoroRes.ok) throw new Error(`Kokoro API: ${kokoroRes.status}`);
-
-        const buffer = await kokoroRes.buffer();
-        fs.writeFileSync(segFile, buffer);
-        audioFiles.push(segFile);
-      } catch (e) {
-        console.error(`Segment ${i} TTS error:`, e.message);
-      }
+    if (!kokoroRes.ok) {
+      const errText = await kokoroRes.text();
+      throw new Error(`Kokoro API 錯誤: ${kokoroRes.status} - ${errText}`);
     }
 
-    // Merge audio files using ffmpeg
-    const outputFile = path.join(AUDIO_DIR, `${podcastId}.wav`);
+    const kokoroData = await kokoroRes.json();
+    const taskId = kokoroData.task_id;
 
-    if (audioFiles.length > 1) {
-      const listFile = path.join(AUDIO_DIR, `${podcastId}_list.txt`);
-      const listContent = audioFiles.map(f => `file '${f}'`).join('\n');
-      fs.writeFileSync(listFile, listContent);
-
-      try {
-        execSync(`ffmpeg -f concat -safe 0 -i "${listFile}" -y "${outputFile}"`, { timeout: 120000 });
-      } catch (e) {
-        console.error('FFmpeg merge error:', e.message);
-        // Fallback: use first file
-        if (audioFiles.length > 0) {
-          fs.copyFileSync(audioFiles[0], outputFile);
-        }
-      }
-
-      // Cleanup segment files
-      try { fs.unlinkSync(listFile); } catch { }
-      audioFiles.forEach(f => { try { fs.unlinkSync(f); } catch { } });
-    } else if (audioFiles.length === 1) {
-      fs.copyFileSync(audioFiles[0], outputFile);
-      try { fs.unlinkSync(audioFiles[0]); } catch { }
-    } else {
-      throw new Error('所有語音片段生成失敗');
+    if (!taskId) {
+      throw new Error('Kokoro API 未回傳 task_id');
     }
 
-    // Save podcast entry
+    console.log(`Kokoro task started: ${taskId}`);
+
+    // Save podcast entry (pending state)
     const podcasts = loadJSON(PODCASTS_FILE, []);
     const podcastEntry = {
       id: podcastId,
       title: title || '未命名 Podcast',
-      audioPath: `/api/audio/${podcastId}.wav`,
+      audioPath: '',
+      taskId: taskId,
+      status: 'generating',
       script,
       createdAt: new Date().toISOString(),
       progress: 0,
@@ -1002,10 +996,59 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     podcasts.unshift(podcastEntry);
     saveJSON(PODCASTS_FILE, podcasts);
 
-    res.json({ success: true, podcast: podcastEntry });
+    res.json({ success: true, podcast: podcastEntry, taskId });
   } catch (error) {
     console.error('Podcast generation error:', error.message);
     res.status(500).json({ error: `Podcast 生成失敗: ${error.message}` });
+  }
+});
+
+// ─── Podcast: Check Task Status ──────────────────────────────
+app.get('/api/podcast/task-status/:taskId', async (req, res) => {
+  try {
+    const settings = getSettings();
+    const { taskId } = req.params;
+
+    const statusRes = await fetch(`${settings.kokoroUrl}/task_status/${taskId}`);
+    if (!statusRes.ok) throw new Error(`Task status API: ${statusRes.status}`);
+
+    const statusData = await statusRes.json();
+    console.log(`Task ${taskId} status:`, statusData.status);
+
+    // If task is completed, download the audio file and save locally
+    if (statusData.status === 'completed' && statusData.audio_url) {
+      const audioUrl = statusData.audio_url.startsWith('http')
+        ? statusData.audio_url
+        : `${settings.kokoroUrl}${statusData.audio_url}`;
+
+      // Find the podcast entry with this taskId
+      const podcasts = loadJSON(PODCASTS_FILE, []);
+      const podcast = podcasts.find(p => p.taskId === taskId);
+
+      if (podcast && !podcast.audioPath) {
+        // Download audio file
+        try {
+          const audioRes = await fetch(audioUrl);
+          if (audioRes.ok) {
+            const buffer = await audioRes.buffer();
+            const ext = audioUrl.match(/\.(\w+)$/)?.[1] || 'wav';
+            const localFile = `${podcast.id}.${ext}`;
+            fs.writeFileSync(path.join(AUDIO_DIR, localFile), buffer);
+            podcast.audioPath = `/api/audio/${localFile}`;
+            podcast.status = 'completed';
+            saveJSON(PODCASTS_FILE, podcasts);
+            console.log(`Audio downloaded: ${localFile}`);
+          }
+        } catch (dlErr) {
+          console.error('Audio download error:', dlErr.message);
+        }
+      }
+    }
+
+    res.json({ success: true, ...statusData });
+  } catch (error) {
+    console.error('Task status error:', error.message);
+    res.status(500).json({ error: error.message });
   }
 });
 

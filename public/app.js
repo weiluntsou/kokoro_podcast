@@ -232,7 +232,8 @@ async function processPost() {
         setStep('save');
         showLoading('儲存至 HedgeDoc...');
 
-        const noteTitle = `X 貼文筆記 - @${currentTweet.author || 'unknown'} - ${new Date().toLocaleDateString('zh-TW')}`;
+        const noteTitle = currentTweet.articleTitle
+            || `X 貼文筆記 - @${currentTweet.author || 'unknown'} - ${new Date().toLocaleDateString('zh-TW')}`;
 
         const saveRes = await fetch(`${API}/api/hedgedoc/create`, {
             method: 'POST',
@@ -580,17 +581,25 @@ function showScriptPreview(script) {
     const preview = document.getElementById('scriptPreview');
     section.style.display = 'block';
 
-    // Colorize speakers
-    const html = script.split('\n').map(line => {
-        if (line.match(/^小明[：:]/)) {
-            return `<div><span class="speaker-a">小明：</span>${escapeHtml(line.replace(/^小明[：:]/, '').trim())}</div>`;
-        } else if (line.match(/^小華[：:]/)) {
-            return `<div><span class="speaker-b">小華：</span>${escapeHtml(line.replace(/^小華[：:]/, '').trim())}</div>`;
-        }
-        return `<div>${escapeHtml(line)}</div>`;
-    }).join('');
+    // Parse Python List format: [("host_f", "text"), ("host_m", "text")]
+    const tupleRegex = /\(\s*["'](host_[fm])["']\s*,\s*["']((?:[^"'\\]|\\.)*)["']\s*\)/g;
+    let match;
+    const lines = [];
 
-    preview.innerHTML = html;
+    while ((match = tupleRegex.exec(script)) !== null) {
+        const speaker = match[1];
+        const text = match[2].replace(/\\"/g, '"').replace(/\\'/g, "'");
+        const displayName = speaker === 'host_f' ? '曉曉' : '雲健';
+        const cssClass = speaker === 'host_f' ? 'speaker-a' : 'speaker-b';
+        lines.push(`<div><span class="${cssClass}">${displayName}：</span>${escapeHtml(text)}</div>`);
+    }
+
+    if (lines.length === 0) {
+        // Fallback: show raw script
+        preview.innerHTML = `<div>${escapeHtml(script)}</div>`;
+    } else {
+        preview.innerHTML = lines.join('');
+    }
 }
 
 // ─── Podcast: Generate Audio ──────────────────────────
@@ -603,7 +612,7 @@ async function generateAudio() {
     const btn = document.getElementById('btnGenAudio');
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner"></span> 生成中...';
-    showLoading('正在用 Kokoro 生成語音...\n這可能需要幾分鐘');
+    showLoading('正在發送講稿到 Kokoro...');
 
     try {
         const notesRes = await fetch(`${API}/api/hedgedoc/list`);
@@ -611,6 +620,7 @@ async function generateAudio() {
         const selectedNotes = notesData.notes.filter(n => selectedNoteIds.has(n.id));
         const title = selectedNotes.map(n => n.title).join(' & ') || 'Podcast';
 
+        // Step 1: Send script to Kokoro (returns task_id)
         const res = await fetch(`${API}/api/podcast/generate-audio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -623,12 +633,23 @@ async function generateAudio() {
 
         if (!data.success) throw new Error(data.error);
 
-        // Play the podcast
-        playPodcast(data.podcast);
-        loadPodcastList();
+        const taskId = data.taskId;
+        if (!taskId) throw new Error('未取得 task_id');
 
-        hideLoading();
-        showToast('Podcast 生成完成！', 'success');
+        showLoading(`Kokoro 語音生成中... (Task: ${taskId.substring(0, 8)}...)\n請耐心等待，這可能需要幾分鐘`);
+
+        // Step 2: Poll task status every 5 seconds
+        const podcast = await pollTaskStatus(taskId, data.podcast);
+
+        // Step 3: Play the completed podcast
+        if (podcast && podcast.audioPath) {
+            playPodcast(podcast);
+            loadPodcastList();
+            hideLoading();
+            showToast('Podcast 生成完成！', 'success');
+        } else {
+            throw new Error('語音生成完成但無法取得音檔');
+        }
 
     } catch (e) {
         hideLoading();
@@ -637,6 +658,43 @@ async function generateAudio() {
         btn.disabled = false;
         btn.innerHTML = '🎤 生成音檔';
     }
+}
+
+// ─── Podcast: Poll Task Status ────────────────────────
+async function pollTaskStatus(taskId, podcastEntry) {
+    const maxWait = 600; // 10 minutes max
+    const interval = 5; // Check every 5 seconds
+    let elapsed = 0;
+
+    while (elapsed < maxWait) {
+        await new Promise(resolve => setTimeout(resolve, interval * 1000));
+        elapsed += interval;
+
+        try {
+            const res = await fetch(`${API}/api/podcast/task-status/${taskId}`);
+            const data = await res.json();
+
+            if (data.status === 'completed') {
+                // Refresh podcast data
+                const listRes = await fetch(`${API}/api/podcast/list`);
+                const listData = await listRes.json();
+                const updated = listData.podcasts.find(p => p.taskId === taskId);
+                return updated || { ...podcastEntry, audioPath: data.audio_url, status: 'completed' };
+            } else if (data.status === 'failed' || data.status === 'error') {
+                throw new Error(data.error || '語音生成任務失敗');
+            } else {
+                // Still processing
+                const mins = Math.floor(elapsed / 60);
+                const secs = elapsed % 60;
+                showLoading(`Kokoro 語音生成中... ${mins}:${secs.toString().padStart(2, '0')}\n狀態: ${data.status || 'processing'}`);
+            }
+        } catch (e) {
+            if (e.message.includes('失敗')) throw e;
+            console.log('Status check error:', e.message);
+        }
+    }
+
+    throw new Error('語音生成超時（超過 10 分鐘）');
 }
 
 // ─── Podcast: Player ──────────────────────────────────
