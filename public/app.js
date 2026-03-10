@@ -169,6 +169,11 @@ async function processPost() {
         setStep('media');
         let contentForNote = currentTweet.text;
 
+        // Append fetched URL content (article, linked page, etc.)
+        if (currentTweet.fetchedContent) {
+            contentForNote += `\n\n連結頁面內容：\n${currentTweet.fetchedContent}`;
+        }
+
         if (currentTweet.hasVideo) {
             // Show video section
             document.getElementById('videoSection').style.display = 'block';

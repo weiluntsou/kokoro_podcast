@@ -223,6 +223,86 @@ app.post('/api/x/parse', async (req, res) => {
 
     console.log(`Parse result: method=${parseMethod}, textLen=${tweetText.length}, hasVideo=${hasVideo}`);
 
+    // ─── Try to fetch content from URLs in tweet text ───
+    let fetchedUrlContent = '';
+    const urlsInText = tweetText.match(/https?:\/\/[^\s]+/g) || [];
+    // Also check the original URL for article links
+    const allUrls = [...urlsInText];
+    if (url.includes('/i/article/') || url.includes('/articles/')) {
+      allUrls.push(url);
+    }
+
+    for (const linkUrl of allUrls) {
+      if (fetchedUrlContent) break;
+      try {
+        // Skip t.co links that just redirect to X itself
+        const cleanUrl = linkUrl.replace(/[).,]+$/, '');
+        console.log(`Trying to fetch content from: ${cleanUrl}`);
+
+        const linkRes = await fetch(cleanUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+          },
+          redirect: 'follow',
+          timeout: 15000
+        });
+
+        if (linkRes.ok) {
+          const contentType = linkRes.headers.get('content-type') || '';
+          if (contentType.includes('text/html') || contentType.includes('application/xhtml')) {
+            const html = await linkRes.text();
+
+            // Extract readable text from HTML
+            let textContent = html
+              // Remove script and style
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+              .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+              .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+              .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+              // Try to extract article/main content
+              .replace(/^[\s\S]*?(<article[\s\S]*?<\/article>)/i, '$1')
+              || html;
+
+            // Also try <meta name="description"> and <title>
+            const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i);
+            const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i);
+            const titleMatch = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+
+            // Clean HTML tags
+            textContent = textContent
+              .replace(/<[^>]*>/g, ' ')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/&nbsp;/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+
+            // Build fetched content
+            const parts = [];
+            if (titleMatch) parts.push(`標題：${titleMatch[1].trim()}`);
+            if (ogDesc) parts.push(`摘要：${ogDesc[1].trim()}`);
+            else if (metaDesc) parts.push(`摘要：${metaDesc[1].trim()}`);
+            if (textContent.length > 50) {
+              // Limit to first ~3000 chars to avoid overloading the LLM
+              parts.push(`內文：${textContent.substring(0, 3000)}`);
+            }
+
+            if (parts.length > 0) {
+              fetchedUrlContent = parts.join('\n\n');
+              console.log(`Fetched ${fetchedUrlContent.length} chars from ${cleanUrl}`);
+            }
+          }
+        }
+      } catch (fetchErr) {
+        console.log(`Failed to fetch ${linkUrl}: ${fetchErr.message}`);
+      }
+    }
+
     res.json({
       success: true,
       tweet: {
@@ -231,7 +311,8 @@ app.post('/api/x/parse', async (req, res) => {
         author: author,
         hasVideo,
         url,
-        parseMethod
+        parseMethod,
+        fetchedContent: fetchedUrlContent
       }
     });
   } catch (error) {
@@ -371,9 +452,15 @@ app.post('/api/gemini/summarize', async (req, res) => {
 
     const prompt = type === 'podcast'
       ? req.body.prompt
-      : `你是一位專業的筆記整理助手。請將以下來自 X (Twitter) 貼文的內容整理成繁體中文筆記格式。
+      : `你是一位專業的筆記整理助手。你的任務是根據以下提供的內容，直接整理成繁體中文筆記。
 
-要求：
+嚴格規則：
+- 你必須直接輸出整理好的筆記，不可以回覆任何對話、提問或要求更多資訊
+- 不要說「請提供連結」或「請貼上內容」之類的話
+- 如果內容較少，就根據現有內容盡量整理
+- 直接以 Markdown 格式輸出筆記內容
+
+格式要求：
 1. 使用 Markdown 格式
 2. 包含重點摘要
 3. 列出關鍵要點
@@ -381,8 +468,12 @@ app.post('/api/gemini/summarize', async (req, res) => {
 5. 保持簡潔但完整
 6. 語言使用繁體中文
 
-原始內容：
-${content}`;
+以下是需要整理的原始內容：
+---
+${content}
+---
+
+請直接輸出整理好的 Markdown 筆記：`;
 
     const model = settings.geminiModel || 'gemma-3-27b-it';
     const geminiRes = await fetch(
