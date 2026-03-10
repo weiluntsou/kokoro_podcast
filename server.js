@@ -1022,32 +1022,87 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
     const statusData = await statusRes.json();
     console.log(`Task ${taskId} status:`, statusData.status);
 
-    // If task is completed, download the audio file and save locally
-    if (statusData.status === 'completed' && statusData.audio_url) {
-      const audioUrl = statusData.audio_url.startsWith('http')
-        ? statusData.audio_url
-        : `${kokoroBaseUrl}${statusData.audio_url.startsWith('/') ? '' : '/'}${statusData.audio_url}`;
-
+    // If task is completed, download the audio file(s) and save locally
+    if (statusData.status === 'completed') {
       // Find the podcast entry with this taskId
       const podcasts = loadJSON(PODCASTS_FILE, []);
       const podcast = podcasts.find(p => p.taskId === taskId);
 
       if (podcast && !podcast.audioPath) {
-        // Download audio file
-        try {
-          const audioRes = await fetch(audioUrl);
-          if (audioRes.ok) {
-            const buffer = await audioRes.buffer();
-            const ext = audioUrl.match(/\.(\w+)$/)?.[1] || 'wav';
-            const localFile = `${podcast.id}.${ext}`;
-            fs.writeFileSync(path.join(AUDIO_DIR, localFile), buffer);
-            podcast.audioPath = `/api/audio/${localFile}`;
+        // Collect URLs to download
+        let urlsToDownload = [];
+        if (Array.isArray(statusData.urls)) {
+          urlsToDownload = statusData.urls;
+        } else if (Array.isArray(statusData.audio_urls)) {
+          urlsToDownload = statusData.audio_urls;
+        } else if (statusData.result && Array.isArray(statusData.result.urls)) {
+          urlsToDownload = statusData.result.urls;
+        } else if (typeof statusData.audio_url === 'string') {
+          urlsToDownload = [statusData.audio_url];
+        }
+
+        if (urlsToDownload.length > 0) {
+          let downloadedFiles = [];
+
+          for (let i = 0; i < urlsToDownload.length; i++) {
+            let url = urlsToDownload[i];
+            const audioUrl = url.startsWith('http')
+              ? url
+              : `${kokoroBaseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+
+            try {
+              const audioRes = await fetch(audioUrl);
+              if (audioRes.ok) {
+                const buffer = await audioRes.buffer();
+                const ext = audioUrl.match(/\.(\w+)(?:[\?#]|$)/)?.[1] || 'mp3';
+                const tempFile = path.join(AUDIO_DIR, `temp_${podcast.id}_${i}.${ext}`);
+                fs.writeFileSync(tempFile, buffer);
+                downloadedFiles.push(tempFile);
+              } else {
+                console.error(`Status ${audioRes.status} downloading ${audioUrl}`);
+              }
+            } catch (dlErr) {
+              console.error('Audio download error:', dlErr.message);
+            }
+          }
+
+          if (downloadedFiles.length === 1) {
+            const ext = downloadedFiles[0].match(/\.(\w+)$/)[1];
+            const finalFile = `${podcast.id}.${ext}`;
+            fs.renameSync(downloadedFiles[0], path.join(AUDIO_DIR, finalFile));
+            podcast.audioPath = `/api/audio/${finalFile}`;
             podcast.status = 'completed';
             saveJSON(PODCASTS_FILE, podcasts);
-            console.log(`Audio downloaded: ${localFile}`);
+            console.log(`Audio downloaded and saved: ${finalFile}`);
+          } else if (downloadedFiles.length > 1) {
+            // Merge multiple segments using ffmpeg
+            const ext = downloadedFiles[0].match(/\.(\w+)$/)[1];
+            const finalFile = `${podcast.id}.${ext}`;
+            const finalPath = path.join(AUDIO_DIR, finalFile);
+
+            const listPath = path.join(AUDIO_DIR, `list_${podcast.id}.txt`);
+            const listContent = downloadedFiles.map(f => `file '${f}'`).join('\n');
+            fs.writeFileSync(listPath, listContent);
+
+            try {
+              // Concat without re-encoding
+              execSync(`ffmpeg -f concat -safe 0 -i "${listPath}" -c copy -y "${finalPath}"`);
+              podcast.audioPath = `/api/audio/${finalFile}`;
+              podcast.status = 'completed';
+              saveJSON(PODCASTS_FILE, podcasts);
+              console.log(`Audios downloaded and merged to: ${finalFile}`);
+            } catch (ffmpegErr) {
+              console.error('FFmpeg merge error:', ffmpegErr.message);
+            } finally {
+              // Cleanup temp files
+              downloadedFiles.forEach(f => {
+                try { fs.unlinkSync(f); } catch (e) { }
+              });
+              try { fs.unlinkSync(listPath); } catch (e) { }
+            }
+          } else {
+            console.error('No audio segments downloaded.');
           }
-        } catch (dlErr) {
-          console.error('Audio download error:', dlErr.message);
         }
       }
     }

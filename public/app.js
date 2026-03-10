@@ -60,12 +60,29 @@ function showToast(message, type = 'info') {
 }
 
 // ─── Loading ──────────────────────────────────────────
+let currentLoadingTarget = null;
+
 function showLoading(text = '處理中...') {
-    document.getElementById('loadingText').textContent = text;
-    document.getElementById('loadingOverlay').classList.add('show');
+    if (currentLoadingTarget) {
+        const el = document.getElementById(currentLoadingTarget);
+        if (el) {
+            el.innerHTML = '<span class="spinner" style="width:16px;height:16px;border-width:2px;border-top-color:var(--accent-primary);margin-right:8px;vertical-align:middle;"></span><span style="vertical-align:middle;">' + text.replace(/\n/g, ' ') + '</span>';
+            el.style.display = 'inline-flex';
+        }
+    } else {
+        document.getElementById('loadingText').innerText = text;
+        document.getElementById('loadingOverlay').classList.add('show');
+    }
 }
 
 function hideLoading() {
+    if (currentLoadingTarget) {
+        const el = document.getElementById(currentLoadingTarget);
+        if (el) {
+            el.style.display = 'none';
+            el.innerHTML = '';
+        }
+    }
     document.getElementById('loadingOverlay').classList.remove('show');
 }
 
@@ -146,7 +163,8 @@ async function processPost() {
 
     const btn = document.getElementById('btnProcess');
     btn.disabled = true;
-    document.getElementById('btnProcessText').innerHTML = '<span class="spinner"></span> 處理中';
+    document.getElementById('btnProcessText').innerHTML = '正在處理...';
+    currentLoadingTarget = 'processStatus';
 
     try {
         // Step 1: Parse tweet
@@ -259,6 +277,7 @@ async function processPost() {
     } finally {
         btn.disabled = false;
         document.getElementById('btnProcessText').innerHTML = '🚀 處理';
+        currentLoadingTarget = null;
     }
 }
 
@@ -513,7 +532,8 @@ async function generateScript() {
 
     const btn = document.getElementById('btnGenScript');
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> 生成中...';
+    btn.innerHTML = '生成中...';
+    currentLoadingTarget = 'podcastStatus';
     showLoading('正在用 Gemini 生成 Podcast 講稿...');
 
     try {
@@ -573,6 +593,7 @@ async function generateScript() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = '✍️ 生成講稿';
+        currentLoadingTarget = null;
     }
 }
 
@@ -611,7 +632,8 @@ async function generateAudio() {
 
     const btn = document.getElementById('btnGenAudio');
     btn.disabled = true;
-    btn.innerHTML = '<span class="spinner"></span> 生成中...';
+    btn.innerHTML = '生成中...';
+    currentLoadingTarget = 'podcastStatus';
     showLoading('正在發送講稿到 Kokoro...');
 
     try {
@@ -657,6 +679,7 @@ async function generateAudio() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = '🎤 生成音檔';
+        currentLoadingTarget = null;
     }
 }
 
@@ -797,6 +820,7 @@ async function loadPodcastList() {
 
         container.innerHTML = data.podcasts.map(p => {
             const progressPct = p.duration ? ((p.progress / p.duration) * 100).toFixed(0) : 0;
+            const encodedP = encodeURIComponent(JSON.stringify(p)).replace(/'/g, "%27");
             return `
         <div class="podcast-item fade-in">
           <div class="podcast-item-header">
@@ -807,7 +831,7 @@ async function loadPodcastList() {
             </div>
           </div>
           <div class="flex gap-2">
-            <button class="btn btn-primary btn-sm" onclick='playPodcast(${JSON.stringify(p).replace(/'/g, "\\'")})'>
+            <button class="btn btn-primary btn-sm" onclick="playPodcast(JSON.parse(decodeURIComponent('${encodedP}')))">
               ▶ 播放
             </button>
             <button class="btn btn-danger btn-sm" onclick="deletePodcast('${p.id}')">🗑️</button>

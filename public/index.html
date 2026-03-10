@@ -56,9 +56,11 @@
           </div>
           <div class="input-row">
             <input type="url" id="postUrl" placeholder="https://x.com/user/status/1234567890..." />
-            <button class="btn btn-primary" id="btnProcess" onclick="processPost()">
+            <button class="btn btn-primary" id="btnProcess" onclick="processPost()" style="white-space:nowrap;">
               <span id="btnProcessText">🚀 處理</span>
             </button>
+            <span id="processStatus"
+              style="display:none; align-self:center; font-size:14px; white-space:nowrap; align-items:center;"></span>
           </div>
         </div>
 
@@ -202,6 +204,8 @@
                   style="display:none">
                   🎤 生成音檔
                 </button>
+                <span id="podcastStatus"
+                  style="display:none; align-self:center; font-size:14px; white-space:nowrap; align-items:center;"></span>
               </div>
             </div>
 
