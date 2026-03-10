@@ -1037,6 +1037,9 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
 
       if (podcast && !podcast.audioPath) {
         // Collect URLs to download
+        console.log('Task completed! Full status data keys:', Object.keys(statusData));
+        if (statusData.result) console.log('statusData.result keys:', Object.keys(statusData.result));
+
         let urlsToDownload = [];
         if (Array.isArray(statusData.urls)) {
           urlsToDownload = statusData.urls;
@@ -1046,7 +1049,15 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
           urlsToDownload = statusData.result.urls;
         } else if (typeof statusData.audio_url === 'string') {
           urlsToDownload = [statusData.audio_url];
+        } else if (statusData.result && typeof statusData.result.audio_url === 'string') {
+          urlsToDownload = [statusData.result.audio_url];
+        } else if (statusData.result && typeof statusData.result.url === 'string') {
+          urlsToDownload = [statusData.result.url];
+        } else if (typeof statusData.url === 'string') {
+          urlsToDownload = [statusData.url];
         }
+
+        console.log('urlsToDownload evaluated to:', urlsToDownload);
 
         if (urlsToDownload.length > 0) {
           let downloadedFiles = [];

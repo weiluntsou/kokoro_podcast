@@ -791,7 +791,8 @@ async function processPodcastWorker(task) {
         playPodcast(podcast);
         loadPodcastList();
     } else {
-        throw new Error('語音生成完成但無法取得音檔');
+        console.error('Missing audioPath in podcast:', podcast, 'From task completion data.');
+        throw new Error(`語音生成完成但無法取得音檔，查無路徑: ${JSON.stringify(podcast)}`);
     }
 }
 
