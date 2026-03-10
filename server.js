@@ -948,8 +948,9 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
       throw new Error('無法解析講稿格式，請確認為 Python List 格式');
     }
 
-    // Ensure we don't include /v1 in the base URL for these custom endpoints
-    const kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+    // Ensure we don't include /v1 or /generate_podcast in the base URL for these custom endpoints
+    let kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+    kokoroBaseUrl = kokoroBaseUrl.replace(/\/generate_podcast\/?$/, '');
 
     // Generate filename strictly as English alphanumeric (Kokoro API requirement)
     const filename = `podcast_${Date.now()}`;
@@ -1010,8 +1011,9 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
     const settings = getSettings();
     const { taskId } = req.params;
 
-    // Ensure we don't include /v1 in the base URL
-    const kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+    // Ensure we don't include /v1 or /generate_podcast in the base URL
+    let kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+    kokoroBaseUrl = kokoroBaseUrl.replace(/\/generate_podcast\/?$/, '');
 
     const statusRes = await fetch(`${kokoroBaseUrl}/task_status/${taskId}`);
     if (!statusRes.ok) throw new Error(`Task status API: ${statusRes.status}`);
