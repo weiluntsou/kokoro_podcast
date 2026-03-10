@@ -56,7 +56,7 @@
           </div>
           <div class="input-row">
             <input type="url" id="postUrl" placeholder="https://x.com/user/status/1234567890..." />
-            <button class="btn btn-primary" id="btnProcess" onclick="processPost()" style="white-space:nowrap;">
+            <button class="btn btn-primary" id="btnProcess" onclick="enqueueProcessPost()">
               <span id="btnProcessText">🚀 處理</span>
             </button>
             <span id="processStatus"
@@ -103,8 +103,9 @@
                 <p>下載並播放貼文中的影片</p>
               </div>
               <div class="flex gap-2" style="margin-left:auto">
-                <button class="btn btn-secondary btn-sm" id="btnDownloadVideo" onclick="downloadVideo()">
-                  ⬇️ 下載影片
+                <button class="btn btn-secondary btn-sm" id="btnDownloadVideo" onclick="enqueueDownloadVideo()"
+                  style="margin-top:10px; width:100%">
+                  ⬇️ 獨立下載影片
                 </button>
               </div>
             </div>
@@ -125,7 +126,8 @@
           </div>
           <div class="download-section">
             <input type="url" id="downloadUrl" placeholder="貼入任何影片連結..." />
-            <button class="btn btn-secondary" id="btnDirectDownload" onclick="directDownload()">
+            <button class="btn btn-secondary" id="btnDirectDownload" onclick="enqueueDirectDownload()"
+              style="width:100px;">
               ⬇️ 下載
             </button>
             <button class="btn btn-secondary btn-icon" id="btnPlayDirect" onclick="playDirectVideo()"
@@ -197,15 +199,9 @@
                 </div>
               </div>
               <div class="flex gap-2">
-                <button class="btn btn-primary" id="btnGenScript" onclick="generateScript()" disabled>
-                  ✍️ 生成講稿
+                <button class="btn btn-primary" id="btnGenPodcast" onclick="enqueuePodcast()" disabled>
+                  🚀 加入 Podcast 生成序列
                 </button>
-                <button class="btn btn-success" id="btnGenAudio" onclick="generateAudio()" disabled
-                  style="display:none">
-                  🎤 生成音檔
-                </button>
-                <span id="podcastStatus"
-                  style="display:none; align-self:center; font-size:14px; white-space:nowrap; align-items:center;"></span>
               </div>
             </div>
 
@@ -347,6 +343,19 @@
         </div>
       </div>
     </div>
+  </div>
+
+  <!-- Global Task Queue -->
+  <div id="globalQueue" class="card"
+    style="position:fixed; bottom:20px; right:20px; width:350px; max-height:450px; overflow-y:auto; z-index:9999; display:none; background:var(--bg-card); box-shadow:var(--shadow-lg);">
+    <div class="card-header" style="margin-bottom:10px;">
+      <div class="icon blue" style="width:30px;height:30px;font-size:16px;">⏱️</div>
+      <div>
+        <h3 style="font-size:14px;">處理佇列</h3>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="TaskQueue.clearDone()" style="margin-left:auto">清除已完成</button>
+    </div>
+    <div id="queueList"></div>
   </div>
 
   <!-- Toast Container -->

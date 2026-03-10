@@ -148,28 +148,179 @@ async function saveSettings() {
     }
 }
 
+// ─── Task Queue ───────────────────────────────────────
+const TaskQueue = {
+    queue: [],
+    isProcessing: false,
+    taskIdCounter: 0,
+
+    addProcessTask(url) {
+        if (!url) return;
+        const task = {
+            id: ++this.taskIdCounter,
+            type: 'process',
+            name: `處理貼文...`,
+            status: 'pending',
+            progress: '排隊中...',
+            data: { url }
+        };
+        this.queue.push(task);
+        this.render();
+        this.processNext();
+        showToast('已加入處理佇列', 'success');
+    },
+
+    addPodcastTask(noteIdsArray, notesData, title) {
+        const task = {
+            id: ++this.taskIdCounter,
+            type: 'podcast',
+            name: `Podcast: ${title.substring(0, 20)}...`,
+            status: 'pending',
+            progress: '排隊中...',
+            data: { noteIds: noteIdsArray, notesData, title }
+        };
+        this.queue.push(task);
+        this.render();
+        this.processNext();
+        showToast('已加入 Podcast 佇列', 'success');
+    },
+
+    addDownloadTask(url) {
+        if (!url) return;
+        const task = {
+            id: ++this.taskIdCounter,
+            type: 'download',
+            name: `下載: ${url.substring(0, 30)}...`,
+            status: 'pending',
+            progress: '排隊中...',
+            data: { url }
+        };
+        this.queue.push(task);
+        this.render();
+        this.processNext();
+        showToast('已加入下載佇列', 'success');
+    },
+
+    addDirectDownloadTask(url) {
+        if (!url) {
+            showToast('請輸入連結', 'error');
+            return;
+        }
+        const task = {
+            id: ++this.taskIdCounter,
+            type: 'direct-download',
+            name: `直接下載: ${url.substring(0, 30)}...`,
+            status: 'pending',
+            progress: '排隊中...',
+            data: { url }
+        };
+        this.queue.push(task);
+        this.render();
+        this.processNext();
+        showToast('已加入下載佇列', 'success');
+    },
+
+    updateTask(id, progress) {
+        const task = this.queue.find(t => t.id === id);
+        if (task) {
+            task.progress = progress;
+            this.render();
+        }
+    },
+
+    clearDone() {
+        this.queue = this.queue.filter(t => t.status === 'pending' || t.status === 'processing');
+        this.render();
+    },
+
+    async processNext() {
+        if (this.isProcessing) return;
+        const taskIndex = this.queue.findIndex(t => t.status === 'pending');
+        if (taskIndex === -1) return;
+
+        this.isProcessing = true;
+        const task = this.queue[taskIndex];
+        task.status = 'processing';
+        this.render();
+
+        try {
+            if (task.type === 'process') {
+                await processPostWorker(task);
+            } else if (task.type === 'podcast') {
+                await processPodcastWorker(task);
+            } else if (task.type === 'download') {
+                await downloadVideoWorker(task);
+            } else if (task.type === 'direct-download') {
+                await directDownloadWorker(task);
+            }
+            task.status = 'done';
+            task.progress = '處理完成';
+            showToast(`[${task.name}] 處理完成`, 'success');
+        } catch (err) {
+            task.status = 'error';
+            task.progress = `錯誤: ${err.message}`;
+            showToast(`[${task.name}]發生錯誤: ${err.message}`, 'error');
+        }
+
+        this.isProcessing = false;
+        this.render();
+        this.processNext();
+    },
+
+    render() {
+        const container = document.getElementById('globalQueue');
+        const list = document.getElementById('queueList');
+        if (!container || !list) return;
+
+        if (this.queue.length === 0) {
+            container.style.display = 'none';
+            return;
+        }
+
+        container.style.display = 'block';
+        list.innerHTML = this.queue.map(t => {
+            let icon = '⏳';
+            if (t.status === 'processing') icon = '<span class="spinner" style="width:14px;height:14px;border-width:2px;border-top-color:var(--accent-primary);"></span>';
+            if (t.status === 'done') icon = '✅';
+            if (t.status === 'error') icon = '❌';
+
+            let opacity = t.status === 'done' || t.status === 'error' ? '0.7' : '1';
+
+            return `
+            <div style="background:var(--bg-input); border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px; opacity:${opacity};">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+                    <div style="font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;" title="${t.name}">${t.name}</div>
+                    <div style="font-size:14px; flex-shrink:0;">${icon}</div>
+                </div>
+                <div style="font-size:11px; color:var(--text-muted);">${t.progress}</div>
+            </div>`;
+        }).join('');
+    }
+};
+
 // ─── Process X Post ───────────────────────────────────
-async function processPost() {
+function enqueueProcessPost() {
     const url = document.getElementById('postUrl').value.trim();
     if (!url) {
         showToast('請輸入 X 貼文連結', 'error');
         return;
     }
-
     if (!url.match(/https?:\/\/(x\.com|twitter\.com)\/\w+\/status\/\d+/i)) {
         showToast('請輸入有效的 X 貼文連結', 'error');
         return;
     }
 
-    const btn = document.getElementById('btnProcess');
-    btn.disabled = true;
-    document.getElementById('btnProcessText').innerHTML = '正在處理...';
-    currentLoadingTarget = 'processStatus';
+    TaskQueue.addProcessTask(url);
+    document.getElementById('postUrl').value = '';
+}
+
+async function processPostWorker(task) {
+    const url = task.data.url;
 
     try {
         // Step 1: Parse tweet
         setStep('parse');
-        showLoading('解析貼文中...');
+        TaskQueue.updateTask(task.id, '解析貼文中...');
 
         const parseRes = await fetch(`${API}/api/x/parse`, {
             method: 'POST',
@@ -197,7 +348,7 @@ async function processPost() {
             document.getElementById('videoSection').style.display = 'block';
 
             // Download video
-            showLoading('下載影片中...');
+            TaskQueue.updateTask(task.id, '下載影片中...');
             const dlRes = await fetch(`${API}/api/x/download-video`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -210,7 +361,7 @@ async function processPost() {
                 showVideoPlayer(dlData.path);
 
                 // Transcribe
-                showLoading('語音轉逐字稿中...');
+                TaskQueue.updateTask(task.id, '語音轉逐字稿中...');
                 const trRes = await fetch(`${API}/api/whisper/transcribe`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -235,7 +386,7 @@ async function processPost() {
             showToast('⚠️ 貼文內容較少，筆記品質可能受限', 'info');
         }
 
-        showLoading('生成中文筆記中...');
+        TaskQueue.updateTask(task.id, '生成中文筆記中...');
 
         const noteRes = await fetch(`${API}/api/gemini/summarize`, {
             method: 'POST',
@@ -248,7 +399,7 @@ async function processPost() {
 
         // Step 4: Save to HedgeDoc
         setStep('save');
-        showLoading('儲存至 HedgeDoc...');
+        TaskQueue.updateTask(task.id, '儲存至 HedgeDoc...');
 
         const noteTitle = currentTweet.articleTitle
             || `X 貼文筆記 - @${currentTweet.author || 'unknown'} - ${new Date().toLocaleDateString('zh-TW')}`;
@@ -266,18 +417,9 @@ async function processPost() {
 
         // Show result
         showNoteResult(noteData.text, saveData.success ? saveData.note : null);
-
-        hideLoading();
-        showToast('處理完成！', 'success');
-
     } catch (e) {
-        hideLoading();
-        showToast(`處理失敗: ${e.message}`, 'error');
         console.error(e);
-    } finally {
-        btn.disabled = false;
-        document.getElementById('btnProcessText').innerHTML = '🚀 處理';
-        currentLoadingTarget = null;
+        throw e;
     }
 }
 
@@ -306,12 +448,14 @@ function showVideoPlayer(videoPath) {
 }
 
 // ─── Download Video Independently ─────────────────────
-async function downloadVideo() {
+function enqueueDownloadVideo() {
     if (!currentTweet) return;
-    const url = currentTweet.url;
-    const btn = document.getElementById('btnDownloadVideo');
-    btn.disabled = true;
-    btn.textContent = '⏳ 下載中...';
+    TaskQueue.addDownloadTask(currentTweet.url);
+}
+
+async function downloadVideoWorker(task) {
+    const url = task.data.url;
+    TaskQueue.updateTask(task.id, '下載影片中...');
 
     try {
         const res = await fetch(`${API}/api/x/download-video`, {
@@ -324,29 +468,29 @@ async function downloadVideo() {
         if (data.success) {
             currentVideoPath = data.path;
             showVideoPlayer(data.path);
-            showToast('影片下載完成', 'success');
         } else {
             throw new Error(data.error);
         }
     } catch (e) {
-        showToast(`下載失敗: ${e.message}`, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = '⬇️ 下載影片';
+        console.error(e);
+        throw e;
     }
 }
 
 // ─── Direct Download ──────────────────────────────────
-async function directDownload() {
+function enqueueDirectDownload() {
     const url = document.getElementById('downloadUrl').value.trim();
     if (!url) {
         showToast('請輸入連結', 'error');
         return;
     }
+    TaskQueue.addDirectDownloadTask(url);
+    document.getElementById('downloadUrl').value = '';
+}
 
-    const btn = document.getElementById('btnDirectDownload');
-    btn.disabled = true;
-    btn.textContent = '⏳ 下載中...';
+async function directDownloadWorker(task) {
+    const url = task.data.url;
+    TaskQueue.updateTask(task.id, '下載影片中...');
 
     try {
         const res = await fetch(`${API}/api/x/download-video`, {
@@ -363,16 +507,12 @@ async function directDownload() {
             const player = document.getElementById('directVideoPlayer');
             player.src = data.path;
             document.getElementById('directVideoContainer').style.display = 'block';
-
-            showToast('影片下載完成', 'success');
         } else {
             throw new Error(data.error);
         }
     } catch (e) {
-        showToast(`下載失敗: ${e.message}`, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = '⬇️ 下載';
+        console.error(e);
+        throw e;
     }
 }
 
@@ -520,81 +660,37 @@ function toggleNoteSelect(id, el) {
         el.querySelector('input').checked = true;
     }
 
-    document.getElementById('btnGenScript').disabled = selectedNoteIds.size === 0;
+    document.getElementById('btnGenPodcast').disabled = selectedNoteIds.size === 0;
 }
 
-// ─── Podcast: Generate Script ─────────────────────────
-async function generateScript() {
+// ─── Podcast: Queue Handler ───────────────────────────
+function enqueuePodcast() {
     if (selectedNoteIds.size === 0) {
         showToast('請先選擇至少一則筆記', 'error');
         return;
     }
 
-    const btn = document.getElementById('btnGenScript');
-    btn.disabled = true;
-    btn.innerHTML = '生成中...';
-    currentLoadingTarget = 'podcastStatus';
-    showLoading('正在用 Gemini 生成 Podcast 講稿...');
+    const noteIdsArray = Array.from(selectedNoteIds);
+    let title = '未命名';
 
-    try {
-        // Fetch selected notes content from HedgeDoc
-        const notesRes = await fetch(`${API}/api/hedgedoc/list`);
-        const notesData = await notesRes.json();
-        const selectedNotes = notesData.notes.filter(n => selectedNoteIds.has(n.id));
-
-        // Fetch note contents
-        let combinedContent = '';
-        let combinedTitle = '';
-
-        for (const note of selectedNotes) {
-            combinedTitle += (combinedTitle ? ' & ' : '') + note.title;
-            // Try to fetch content from HedgeDoc
-            try {
-                const settings = await (await fetch(`${API}/api/settings`)).json();
-                const noteId = note.url.split('/').pop();
-                const contentRes = await fetch(`${settings.hedgedocUrl}/${noteId}/download`, {
-                    headers: { 'Cookie': settings.hedgedocCookie || '' }
-                });
-                if (contentRes.ok) {
-                    const content = await contentRes.text();
-                    combinedContent += `\n\n--- ${note.title} ---\n${content}`;
-                } else {
-                    combinedContent += `\n\n--- ${note.title} ---\n（標題：${note.title}）`;
-                }
-            } catch {
-                combinedContent += `\n\n--- ${note.title} ---\n（標題：${note.title}）`;
-            }
-        }
-
-        const scriptRes = await fetch(`${API}/api/podcast/generate-script`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                noteContents: combinedContent,
-                noteTitle: combinedTitle
-            })
+    // Attempt to get selected note titles from DOM
+    const selectedEls = document.querySelectorAll('.note-select-item.selected');
+    if (selectedEls.length > 0) {
+        const titles = Array.from(selectedEls).map(el => {
+            return el.querySelector('div div').textContent;
         });
-        const scriptData = await scriptRes.json();
-
-        if (!scriptData.success) throw new Error(scriptData.error);
-
-        currentScript = scriptData.script;
-        showScriptPreview(scriptData.script);
-
-        document.getElementById('btnGenAudio').style.display = 'inline-flex';
-        document.getElementById('btnGenAudio').disabled = false;
-
-        hideLoading();
-        showToast('講稿生成完成！', 'success');
-
-    } catch (e) {
-        hideLoading();
-        showToast(`講稿生成失敗: ${e.message}`, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '✍️ 生成講稿';
-        currentLoadingTarget = null;
+        title = titles.join(' & ');
     }
+
+    TaskQueue.addPodcastTask(noteIdsArray, null, title);
+
+    // Uncheck all selected notes
+    selectedNoteIds.clear();
+    document.querySelectorAll('.note-select-item input').forEach(el => {
+        el.checked = false;
+        el.closest('.note-select-item').classList.remove('selected');
+    });
+    document.getElementById('btnGenPodcast').disabled = true;
 }
 
 function showScriptPreview(script) {
@@ -602,7 +698,6 @@ function showScriptPreview(script) {
     const preview = document.getElementById('scriptPreview');
     section.style.display = 'block';
 
-    // Parse Python List format: [("host_f", "text"), ("host_m", "text")]
     const tupleRegex = /\(\s*["'](host_[fm])["']\s*,\s*["']((?:[^"'\\]|\\.)*)["']\s*\)/g;
     let match;
     const lines = [];
@@ -616,75 +711,92 @@ function showScriptPreview(script) {
     }
 
     if (lines.length === 0) {
-        // Fallback: show raw script
         preview.innerHTML = `<div>${escapeHtml(script)}</div>`;
     } else {
         preview.innerHTML = lines.join('');
     }
 }
 
-// ─── Podcast: Generate Audio ──────────────────────────
-async function generateAudio() {
-    if (!currentScript) {
-        showToast('請先生成講稿', 'error');
-        return;
+async function processPodcastWorker(task) {
+    const { noteIds, title } = task.data;
+
+    TaskQueue.updateTask(task.id, '讀取 Hedgehog 筆記中...');
+
+    const notesRes = await fetch(`${API}/api/hedgedoc/list`);
+    const notesData = await notesRes.json();
+    const selectedNotes = notesData.notes.filter(n => noteIds.includes(n.id));
+
+    let combinedContent = '';
+    let combinedTitle = '';
+
+    for (const note of selectedNotes) {
+        combinedTitle += (combinedTitle ? ' & ' : '') + note.title;
+        try {
+            const settingsRes = await fetch(`${API}/api/settings`);
+            const settings = await settingsRes.json();
+            const noteId = note.url.split('/').pop();
+            const contentRes = await fetch(`${settings.hedgedocUrl}/${noteId}/download`, {
+                headers: { 'Cookie': settings.hedgedocCookie || '' }
+            });
+            if (contentRes.ok) {
+                const content = await contentRes.text();
+                combinedContent += `\n\n--- ${note.title} ---\n${content}`;
+            } else {
+                combinedContent += `\n\n--- ${note.title} ---\n（標題：${note.title}）`;
+            }
+        } catch {
+            combinedContent += `\n\n--- ${note.title} ---\n（標題：${note.title}）`;
+        }
     }
 
-    const btn = document.getElementById('btnGenAudio');
-    btn.disabled = true;
-    btn.innerHTML = '生成中...';
-    currentLoadingTarget = 'podcastStatus';
-    showLoading('正在發送講稿到 Kokoro...');
+    TaskQueue.updateTask(task.id, '📍 正在用 Gemini 生成 Podcast 講稿...');
+    const scriptRes = await fetch(`${API}/api/podcast/generate-script`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            noteContents: combinedContent,
+            noteTitle: combinedTitle || title
+        })
+    });
+    const scriptData = await scriptRes.json();
 
-    try {
-        const notesRes = await fetch(`${API}/api/hedgedoc/list`);
-        const notesData = await notesRes.json();
-        const selectedNotes = notesData.notes.filter(n => selectedNoteIds.has(n.id));
-        const title = selectedNotes.map(n => n.title).join(' & ') || 'Podcast';
+    if (!scriptData.success) {
+        throw new Error(scriptData.error || '講稿生成失敗');
+    }
 
-        // Step 1: Send script to Kokoro (returns task_id)
-        const res = await fetch(`${API}/api/podcast/generate-audio`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                script: currentScript,
-                title: `🎙️ ${title}`
-            })
-        });
-        const data = await res.json();
+    const script = scriptData.script;
+    currentScript = script; // Keep this mainly for UI display if needed
+    showScriptPreview(script);
 
-        if (!data.success) throw new Error(data.error);
+    TaskQueue.updateTask(task.id, '📍 正在發送講稿到 Kokoro 生成語音...');
+    const audioRes = await fetch(`${API}/api/podcast/generate-audio`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            script: script,
+            title: `🎙️ ${combinedTitle || title}`
+        })
+    });
 
-        const taskId = data.taskId;
-        if (!taskId) throw new Error('未取得 task_id');
+    const data = await audioRes.json();
+    if (!data.success) throw new Error(data.error);
 
-        showLoading(`Kokoro 語音生成中... (Task: ${taskId.substring(0, 8)}...)\n請耐心等待，這可能需要幾分鐘`);
+    const taskId = data.taskId;
+    if (!taskId) throw new Error('未取得 task_id');
 
-        // Step 2: Poll task status every 5 seconds
-        const podcast = await pollTaskStatus(taskId, data.podcast);
+    TaskQueue.updateTask(task.id, `Kokoro 語音生成中... (Task: ${taskId.substring(0, 8)}...)`);
+    const podcast = await pollTaskStatus(taskId, data.podcast, task.id);
 
-        // Step 3: Play the completed podcast
-        if (podcast && podcast.audioPath) {
-            playPodcast(podcast);
-            loadPodcastList();
-            hideLoading();
-            showToast('Podcast 生成完成！', 'success');
-        } else {
-            throw new Error('語音生成完成但無法取得音檔');
-        }
-
-    } catch (e) {
-        hideLoading();
-        showToast(`音檔生成失敗: ${e.message}`, 'error');
-    } finally {
-        btn.disabled = false;
-        btn.innerHTML = '🎤 生成音檔';
-        currentLoadingTarget = null;
+    if (podcast && podcast.audioPath) {
+        playPodcast(podcast);
+        loadPodcastList();
+    } else {
+        throw new Error('語音生成完成但無法取得音檔');
     }
 }
 
 // ─── Podcast: Poll Task Status ────────────────────────
-async function pollTaskStatus(taskId, podcastEntry) {
+async function pollTaskStatus(taskId, podcastEntry, queueTaskId) {
     const maxWait = 600; // 10 minutes max
     const interval = 5; // Check every 5 seconds
     let elapsed = 0;
@@ -698,7 +810,6 @@ async function pollTaskStatus(taskId, podcastEntry) {
             const data = await res.json();
 
             if (data.status === 'completed') {
-                // Refresh podcast data
                 const listRes = await fetch(`${API}/api/podcast/list`);
                 const listData = await listRes.json();
                 const updated = listData.podcasts.find(p => p.taskId === taskId);
@@ -706,10 +817,13 @@ async function pollTaskStatus(taskId, podcastEntry) {
             } else if (data.status === 'failed' || data.status === 'error') {
                 throw new Error(data.error || '語音生成任務失敗');
             } else {
-                // Still processing
                 const mins = Math.floor(elapsed / 60);
                 const secs = elapsed % 60;
-                showLoading(`Kokoro 語音生成中... ${mins}:${secs.toString().padStart(2, '0')}\n狀態: ${data.status || 'processing'}`);
+
+                const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+                if (queueTaskId) {
+                    TaskQueue.updateTask(queueTaskId, `Kokoro 語音生成中... ${timeStr}\\n狀態: ${data.status || 'processing'}`);
+                }
             }
         } catch (e) {
             if (e.message.includes('失敗')) throw e;
@@ -721,6 +835,14 @@ async function pollTaskStatus(taskId, podcastEntry) {
 }
 
 // ─── Podcast: Player ──────────────────────────────────
+function playPodcastById(id) {
+    if (!window.loadedPodcasts) return;
+    const podcast = window.loadedPodcasts.find(p => p.id === id);
+    if (podcast) {
+        playPodcast(podcast);
+    }
+}
+
 function playPodcast(podcast) {
     currentPodcastId = podcast.id;
 
@@ -818,9 +940,10 @@ async function loadPodcastList() {
             return;
         }
 
+        window.loadedPodcasts = data.podcasts;
+
         container.innerHTML = data.podcasts.map(p => {
             const progressPct = p.duration ? ((p.progress / p.duration) * 100).toFixed(0) : 0;
-            const encodedP = encodeURIComponent(JSON.stringify(p)).replace(/'/g, "%27");
             return `
         <div class="podcast-item fade-in">
           <div class="podcast-item-header">
@@ -831,7 +954,7 @@ async function loadPodcastList() {
             </div>
           </div>
           <div class="flex gap-2">
-            <button class="btn btn-primary btn-sm" onclick="playPodcast(JSON.parse(decodeURIComponent('${encodedP}')))">
+            <button class="btn btn-primary btn-sm" onclick="playPodcastById('${escapeHtml(p.id)}')">
               ▶ 播放
             </button>
             <button class="btn btn-danger btn-sm" onclick="deletePodcast('${p.id}')">🗑️</button>
