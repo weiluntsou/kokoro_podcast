@@ -750,12 +750,13 @@ app.post('/api/gemini/summarize', async (req, res) => {
 - ⚠️ 嚴格輸出限制：必須『只』輸出筆記內容，絕對不可以使用 markdown 的 code block（也就是不要用 \`\`\` 包起來）。
 
 格式要求：
-1. 使用 Markdown 格式（如標題 #、粗體 **、列表 -）來讓閱讀更清晰
-2. 包含重點摘要
-3. 列出關鍵要點
-4. 如果有技術內容，請適當解釋
-5. 保持簡潔但完整
-6. 語言使用繁體中文
+1. **非常重要**：筆記的最開頭第一行必須加上標籤，格式為：###### tags: \`標籤1\` \`標籤2\`（請根據內容自動生成 2-3 個相關的標籤）
+2. 使用 Markdown 格式（如標題 #、粗體 **、列表 -）來讓閱讀更清晰
+3. 包含重點摘要
+4. 列出關鍵要點
+5. 如果有技術內容，請適當解釋
+6. 保持簡潔但完整
+7. 語言使用繁體中文
 
 以下是需要整理的原始內容：
 ---
@@ -1015,7 +1016,7 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
     let kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
     kokoroBaseUrl = kokoroBaseUrl.replace(/\/generate_podcast\/?$/, '');
 
-    const statusRes = await fetch(`${kokoroBaseUrl}/task_status/${taskId}`);
+    const statusRes = await fetch(`${kokoroBaseUrl}/status/${taskId}`);
     if (!statusRes.ok) throw new Error(`Task status API: ${statusRes.status}`);
 
     const statusData = await statusRes.json();
