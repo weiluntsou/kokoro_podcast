@@ -957,7 +957,10 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     console.log(`Sending to Kokoro: filename=${filename}, segments=${scriptData.length}`);
 
     // Send to Kokoro generate_podcast API
-    const kokoroRes = await fetch(`${settings.kokoroUrl}/generate_podcast`, {
+    // Ensure we don't include /v1 in the base URL for these custom endpoints
+    const kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+
+    const kokoroRes = await fetch(`${kokoroBaseUrl}/generate_podcast`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1009,7 +1012,10 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
     const settings = getSettings();
     const { taskId } = req.params;
 
-    const statusRes = await fetch(`${settings.kokoroUrl}/task_status/${taskId}`);
+    // Ensure we don't include /v1 in the base URL
+    const kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+
+    const statusRes = await fetch(`${kokoroBaseUrl}/task_status/${taskId}`);
     if (!statusRes.ok) throw new Error(`Task status API: ${statusRes.status}`);
 
     const statusData = await statusRes.json();
@@ -1019,7 +1025,7 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
     if (statusData.status === 'completed' && statusData.audio_url) {
       const audioUrl = statusData.audio_url.startsWith('http')
         ? statusData.audio_url
-        : `${settings.kokoroUrl}${statusData.audio_url}`;
+        : `${kokoroBaseUrl}${statusData.audio_url.startsWith('/') ? '' : '/'}${statusData.audio_url}`;
 
       // Find the podcast entry with this taskId
       const podcasts = loadJSON(PODCASTS_FILE, []);
