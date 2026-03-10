@@ -309,12 +309,77 @@ app.post('/api/x/parse', async (req, res) => {
             if (fxData.tweet) {
               console.log('FxTwitter tweet keys:', Object.keys(fxData.tweet).join(', '));
               tweetText = fxData.tweet.text ? String(fxData.tweet.text) : '';
-              // For articles, also check for article_text or longer content fields
+
+              // For articles, extract full article content
               if (fxData.tweet.article) {
-                console.log('FxTwitter article keys:', Object.keys(fxData.tweet.article).join(', '));
-                const articleText = fxData.tweet.article.text || fxData.tweet.article.content || fxData.tweet.article.body;
-                if (articleText) tweetText = String(articleText);
+                const art = fxData.tweet.article;
+                console.log('FxTwitter article keys:', Object.keys(art).join(', '));
+
+                // Debug: log content type and preview
+                console.log('FxTwitter article.content type:', typeof art.content);
+                if (art.content) {
+                  const preview = typeof art.content === 'string'
+                    ? art.content.substring(0, 200)
+                    : JSON.stringify(art.content).substring(0, 200);
+                  console.log('FxTwitter article.content preview:', preview);
+                }
+
+                // Build article text from available fields
+                const articleParts = [];
+                if (art.title) articleParts.push(`# ${String(art.title)}`);
+                if (art.preview_text) articleParts.push(String(art.preview_text));
+
+                // Handle content field - could be string (HTML/markdown), object, or array
+                if (art.content) {
+                  let contentStr = '';
+                  if (typeof art.content === 'string') {
+                    // Could be HTML - strip tags
+                    contentStr = art.content
+                      .replace(/<br\s*\/?>/gi, '\n')
+                      .replace(/<\/p>/gi, '\n\n')
+                      .replace(/<\/h[1-6]>/gi, '\n\n')
+                      .replace(/<\/li>/gi, '\n')
+                      .replace(/<li[^>]*>/gi, '- ')
+                      .replace(/<[^>]*>/g, '')
+                      .replace(/&amp;/g, '&')
+                      .replace(/&lt;/g, '<')
+                      .replace(/&gt;/g, '>')
+                      .replace(/&quot;/g, '"')
+                      .replace(/&#39;/g, "'")
+                      .replace(/&nbsp;/g, ' ')
+                      .replace(/\n{3,}/g, '\n\n')
+                      .trim();
+                  } else if (Array.isArray(art.content)) {
+                    // Array of content blocks
+                    contentStr = art.content.map(block => {
+                      if (typeof block === 'string') return block;
+                      if (block.text) return String(block.text);
+                      if (block.content) return String(block.content);
+                      return JSON.stringify(block);
+                    }).join('\n\n');
+                  } else if (typeof art.content === 'object') {
+                    // Object - try to extract text
+                    contentStr = art.content.text || art.content.body ||
+                      art.content.html || JSON.stringify(art.content);
+                    if (typeof contentStr !== 'string') contentStr = JSON.stringify(contentStr);
+                    // Strip HTML if present
+                    contentStr = contentStr
+                      .replace(/<[^>]*>/g, ' ')
+                      .replace(/\s+/g, ' ')
+                      .trim();
+                  }
+                  if (contentStr && contentStr.length > 10) {
+                    articleParts.push(contentStr);
+                  }
+                }
+
+                const fullArticle = articleParts.join('\n\n');
+                if (fullArticle.length > tweetText.length) {
+                  tweetText = fullArticle;
+                  console.log(`FxTwitter article text built, len=${tweetText.length}`);
+                }
               }
+
               if (fxData.tweet.media && fxData.tweet.media.videos && fxData.tweet.media.videos.length > 0) {
                 hasVideo = true;
               }
