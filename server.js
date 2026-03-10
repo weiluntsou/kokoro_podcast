@@ -1055,6 +1055,9 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
           urlsToDownload = [statusData.result.url];
         } else if (typeof statusData.url === 'string') {
           urlsToDownload = [statusData.url];
+        } else if (typeof statusData.file_path === 'string') {
+          // If the API returns file_path, download from /download/{task_id}
+          urlsToDownload = [`/download/${taskId}`];
         }
 
         console.log('urlsToDownload evaluated to:', urlsToDownload);

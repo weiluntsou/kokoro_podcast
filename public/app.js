@@ -798,7 +798,7 @@ async function processPodcastWorker(task) {
 
 // ─── Podcast: Poll Task Status ────────────────────────
 async function pollTaskStatus(taskId, podcastEntry, queueTaskId) {
-    const maxWait = 600; // 10 minutes max
+    const maxWait = 7200; // 2 hours max
     const interval = 5; // Check every 5 seconds
     let elapsed = 0;
 
