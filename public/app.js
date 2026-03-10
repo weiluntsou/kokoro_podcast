@@ -91,6 +91,7 @@ async function loadSettings() {
         const settings = await res.json();
 
         document.getElementById('settingGeminiKey').value = settings.geminiApiKey || '';
+        document.getElementById('settingGeminiModel').value = settings.geminiModel || 'gemma-3-27b-it';
         document.getElementById('settingHedgedocUrl').value = settings.hedgedocUrl || '';
         document.getElementById('settingHedgedocCookie').value = settings.hedgedocCookie || '';
         document.getElementById('settingWhisperUrl').value = settings.whisperUrl || 'http://localhost:8080';
@@ -105,6 +106,7 @@ async function saveSettings() {
     try {
         const settings = {
             geminiApiKey: document.getElementById('settingGeminiKey').value.trim(),
+            geminiModel: document.getElementById('settingGeminiModel').value,
             hedgedocUrl: document.getElementById('settingHedgedocUrl').value.trim().replace(/\/$/, ''),
             hedgedocCookie: document.getElementById('settingHedgedocCookie').value.trim(),
             whisperUrl: document.getElementById('settingWhisperUrl').value.trim().replace(/\/$/, ''),

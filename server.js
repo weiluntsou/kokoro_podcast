@@ -40,6 +40,7 @@ function saveJSON(file, data) {
 function getSettings() {
   return loadJSON(SETTINGS_FILE, {
     geminiApiKey: '',
+    geminiModel: 'gemma-3-27b-it',
     hedgedocUrl: '',
     hedgedocCookie: '',
     whisperUrl: 'http://localhost:8080',
@@ -310,8 +311,9 @@ app.post('/api/gemini/summarize', async (req, res) => {
 原始內容：
 ${content}`;
 
+    const model = settings.geminiModel || 'gemma-3-27b-it';
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${settings.geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -432,8 +434,9 @@ app.post('/api/podcast/generate-script', async (req, res) => {
 筆記內容：
 ${noteContents}`;
 
+    const model = settings.geminiModel || 'gemma-3-27b-it';
     const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${settings.geminiApiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,338 +8,355 @@
   <title>X Post Processor</title>
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
 
-<div id="app">
-  <!-- Sidebar Navigation -->
-  <nav class="sidebar">
-    <div class="sidebar-logo">X</div>
-    <button class="nav-btn active" data-page="process" id="nav-process" onclick="switchPage('process')">
-      📝
-      <span class="tooltip">處理貼文</span>
-    </button>
-    <button class="nav-btn" data-page="notes" id="nav-notes" onclick="switchPage('notes')">
-      📋
-      <span class="tooltip">筆記列表</span>
-    </button>
-    <button class="nav-btn" data-page="podcast" id="nav-podcast" onclick="switchPage('podcast')">
-      🎙️
-      <span class="tooltip">Podcast</span>
-    </button>
-    <button class="nav-btn" data-page="settings" id="nav-settings" onclick="switchPage('settings')" style="margin-top:auto">
-      ⚙️
-      <span class="tooltip">設定</span>
-    </button>
-  </nav>
+  <div id="app">
+    <!-- Sidebar Navigation -->
+    <nav class="sidebar">
+      <div class="sidebar-logo">X</div>
+      <button class="nav-btn active" data-page="process" id="nav-process" onclick="switchPage('process')">
+        📝
+        <span class="tooltip">處理貼文</span>
+      </button>
+      <button class="nav-btn" data-page="notes" id="nav-notes" onclick="switchPage('notes')">
+        📋
+        <span class="tooltip">筆記列表</span>
+      </button>
+      <button class="nav-btn" data-page="podcast" id="nav-podcast" onclick="switchPage('podcast')">
+        🎙️
+        <span class="tooltip">Podcast</span>
+      </button>
+      <button class="nav-btn" data-page="settings" id="nav-settings" onclick="switchPage('settings')"
+        style="margin-top:auto">
+        ⚙️
+        <span class="tooltip">設定</span>
+      </button>
+    </nav>
 
-  <!-- Main Content -->
-  <div class="main-content">
-    <!-- ═══════════════════════════════════════════════ -->
-    <!-- PAGE: Process X Post                           -->
-    <!-- ═══════════════════════════════════════════════ -->
-    <div id="page-process" class="page active">
-      <div class="page-header">
-        <h1>處理 X 貼文</h1>
-        <p>貼上 X 貼文連結，自動解析內容並生成中文筆記</p>
-      </div>
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Process X Post                           -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-process" class="page active">
+        <div class="page-header">
+          <h1>處理 X 貼文</h1>
+          <p>貼上 X 貼文連結，自動解析內容並生成中文筆記</p>
+        </div>
 
-      <!-- URL Input -->
-      <div class="card">
-        <div class="card-header">
-          <div class="icon purple">🔗</div>
-          <div>
-            <h3>貼文連結</h3>
-            <p>支援 x.com / twitter.com 連結</p>
-          </div>
-        </div>
-        <div class="input-row">
-          <input type="url" id="postUrl" placeholder="https://x.com/user/status/1234567890..." />
-          <button class="btn btn-primary" id="btnProcess" onclick="processPost()">
-            <span id="btnProcessText">🚀 處理</span>
-          </button>
-        </div>
-      </div>
-
-      <!-- Process Steps -->
-      <div class="process-steps" id="processSteps" style="display:none">
-        <div class="process-step" id="step-parse">
-          <span class="step-num">1</span>解析貼文
-        </div>
-        <div class="process-step" id="step-media">
-          <span class="step-num">2</span>多媒體處理
-        </div>
-        <div class="process-step" id="step-note">
-          <span class="step-num">3</span>生成筆記
-        </div>
-        <div class="process-step" id="step-save">
-          <span class="step-num">4</span>儲存筆記
-        </div>
-      </div>
-
-      <!-- Tweet Preview -->
-      <div id="tweetPreview" class="card" style="display:none">
-        <div class="card-header">
-          <div class="icon blue">𝕏</div>
-          <div>
-            <h3>貼文內容</h3>
-            <p id="tweetAuthor">@user</p>
-          </div>
-          <div class="tweet-badges" id="tweetBadges"></div>
-        </div>
-        <div class="tweet-text" id="tweetText"></div>
-      </div>
-
-      <!-- Video Section -->
-      <div id="videoSection" style="display:none">
+        <!-- URL Input -->
         <div class="card">
           <div class="card-header">
-            <div class="icon orange">🎬</div>
+            <div class="icon purple">🔗</div>
             <div>
-              <h3>影片</h3>
-              <p>下載並播放貼文中的影片</p>
-            </div>
-            <div class="flex gap-2" style="margin-left:auto">
-              <button class="btn btn-secondary btn-sm" id="btnDownloadVideo" onclick="downloadVideo()">
-                ⬇️ 下載影片
-              </button>
+              <h3>貼文連結</h3>
+              <p>支援 x.com / twitter.com 連結</p>
             </div>
           </div>
-          <div class="video-container" id="videoContainer" style="display:none">
-            <video id="videoPlayer" controls></video>
+          <div class="input-row">
+            <input type="url" id="postUrl" placeholder="https://x.com/user/status/1234567890..." />
+            <button class="btn btn-primary" id="btnProcess" onclick="processPost()">
+              <span id="btnProcessText">🚀 處理</span>
+            </button>
           </div>
         </div>
-      </div>
 
-      <!-- Download URL (standalone) -->
-      <div class="card">
-        <div class="card-header">
-          <div class="icon green">📥</div>
-          <div>
-            <h3>影片下載器</h3>
-            <p>直接貼入連結下載影片並播放</p>
+        <!-- Process Steps -->
+        <div class="process-steps" id="processSteps" style="display:none">
+          <div class="process-step" id="step-parse">
+            <span class="step-num">1</span>解析貼文
+          </div>
+          <div class="process-step" id="step-media">
+            <span class="step-num">2</span>多媒體處理
+          </div>
+          <div class="process-step" id="step-note">
+            <span class="step-num">3</span>生成筆記
+          </div>
+          <div class="process-step" id="step-save">
+            <span class="step-num">4</span>儲存筆記
           </div>
         </div>
-        <div class="download-section">
-          <input type="url" id="downloadUrl" placeholder="貼入任何影片連結..." />
-          <button class="btn btn-secondary" id="btnDirectDownload" onclick="directDownload()">
-            ⬇️ 下載
-          </button>
-          <button class="btn btn-secondary btn-icon" id="btnPlayDirect" onclick="playDirectVideo()" style="display:none" title="播放影片">
-            ▶️
-          </button>
-        </div>
-        <div class="video-container" id="directVideoContainer" style="display:none">
-          <video id="directVideoPlayer" controls></video>
-        </div>
-      </div>
 
-      <!-- Note Result -->
-      <div id="noteResult" class="card" style="display:none">
-        <div class="card-header">
-          <div class="icon green">📝</div>
-          <div>
-            <h3>生成的筆記</h3>
-            <p id="noteResultUrl"></p>
+        <!-- Tweet Preview -->
+        <div id="tweetPreview" class="card" style="display:none">
+          <div class="card-header">
+            <div class="icon blue">𝕏</div>
+            <div>
+              <h3>貼文內容</h3>
+              <p id="tweetAuthor">@user</p>
+            </div>
+            <div class="tweet-badges" id="tweetBadges"></div>
           </div>
-          <a id="noteLink" href="#" target="_blank" class="btn btn-success btn-sm" style="margin-left:auto">
-            🔗 開啟 HedgeDoc
-          </a>
+          <div class="tweet-text" id="tweetText"></div>
         </div>
-        <div class="md-preview" id="noteContent"></div>
-      </div>
-    </div>
 
-    <!-- ═══════════════════════════════════════════════ -->
-    <!-- PAGE: Notes List                               -->
-    <!-- ═══════════════════════════════════════════════ -->
-    <div id="page-notes" class="page">
-      <div class="page-header">
-        <h1>📋 筆記列表</h1>
-        <p>已處理的 HedgeDoc 筆記</p>
-      </div>
-      <div id="notesList">
-        <div class="empty-state">
-          <div class="icon">📭</div>
-          <p>尚未有任何筆記，去處理一些 X 貼文吧！</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════ -->
-    <!-- PAGE: Podcast                                  -->
-    <!-- ═══════════════════════════════════════════════ -->
-    <div id="page-podcast" class="page">
-      <div class="page-header">
-        <h1>🎙️ Podcast 工廠</h1>
-        <p>選擇筆記生成雙人主持 Podcast</p>
-      </div>
-
-      <div class="grid-2">
-        <!-- Left: Generate Podcast -->
-        <div>
-          <!-- Note Selection -->
+        <!-- Video Section -->
+        <div id="videoSection" style="display:none">
           <div class="card">
             <div class="card-header">
-              <div class="icon blue">📋</div>
+              <div class="icon orange">🎬</div>
               <div>
-                <h3>選擇筆記</h3>
-                <p>勾選要轉為 Podcast 的筆記</p>
+                <h3>影片</h3>
+                <p>下載並播放貼文中的影片</p>
+              </div>
+              <div class="flex gap-2" style="margin-left:auto">
+                <button class="btn btn-secondary btn-sm" id="btnDownloadVideo" onclick="downloadVideo()">
+                  ⬇️ 下載影片
+                </button>
               </div>
             </div>
-            <div class="note-select-list" id="podcastNoteSelect">
-              <div class="empty-state" style="padding:20px">
-                <p>尚無可用筆記</p>
-              </div>
+            <div class="video-container" id="videoContainer" style="display:none">
+              <video id="videoPlayer" controls></video>
             </div>
-            <div class="flex gap-2">
-              <button class="btn btn-primary" id="btnGenScript" onclick="generateScript()" disabled>
-                ✍️ 生成講稿
-              </button>
-              <button class="btn btn-success" id="btnGenAudio" onclick="generateAudio()" disabled style="display:none">
-                🎤 生成音檔
-              </button>
-            </div>
-          </div>
-
-          <!-- Script Preview -->
-          <div id="scriptSection" class="card" style="display:none">
-            <div class="card-header">
-              <div class="icon orange">📜</div>
-              <div>
-                <h3>Podcast 講稿</h3>
-                <p>雙人主持對話</p>
-              </div>
-            </div>
-            <div class="script-preview" id="scriptPreview"></div>
           </div>
         </div>
 
-        <!-- Right: Podcast List + Player -->
-        <div>
-          <!-- Active Player -->
-          <div class="card" id="podcastPlayerCard" style="display:none">
-            <div class="card-header">
-              <div class="icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);color:white">🎧</div>
-              <div>
-                <h3>正在播放</h3>
-                <p id="currentPodcastTitle">-</p>
-              </div>
+        <!-- Download URL (standalone) -->
+        <div class="card">
+          <div class="card-header">
+            <div class="icon green">📥</div>
+            <div>
+              <h3>影片下載器</h3>
+              <p>直接貼入連結下載影片並播放</p>
             </div>
-            <div class="audio-player">
-              <div class="audio-player-top">
-                <button class="audio-play-btn" id="podcastPlayBtn" onclick="togglePodcastPlay()">▶</button>
-                <div class="audio-info">
-                  <div class="audio-title" id="podcastAudioTitle">-</div>
-                  <div class="audio-time">
-                    <span id="podcastCurrentTime">00:00</span> / <span id="podcastDuration">00:00</span>
-                  </div>
+          </div>
+          <div class="download-section">
+            <input type="url" id="downloadUrl" placeholder="貼入任何影片連結..." />
+            <button class="btn btn-secondary" id="btnDirectDownload" onclick="directDownload()">
+              ⬇️ 下載
+            </button>
+            <button class="btn btn-secondary btn-icon" id="btnPlayDirect" onclick="playDirectVideo()"
+              style="display:none" title="播放影片">
+              ▶️
+            </button>
+          </div>
+          <div class="video-container" id="directVideoContainer" style="display:none">
+            <video id="directVideoPlayer" controls></video>
+          </div>
+        </div>
+
+        <!-- Note Result -->
+        <div id="noteResult" class="card" style="display:none">
+          <div class="card-header">
+            <div class="icon green">📝</div>
+            <div>
+              <h3>生成的筆記</h3>
+              <p id="noteResultUrl"></p>
+            </div>
+            <a id="noteLink" href="#" target="_blank" class="btn btn-success btn-sm" style="margin-left:auto">
+              🔗 開啟 HedgeDoc
+            </a>
+          </div>
+          <div class="md-preview" id="noteContent"></div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Notes List                               -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-notes" class="page">
+        <div class="page-header">
+          <h1>📋 筆記列表</h1>
+          <p>已處理的 HedgeDoc 筆記</p>
+        </div>
+        <div id="notesList">
+          <div class="empty-state">
+            <div class="icon">📭</div>
+            <p>尚未有任何筆記，去處理一些 X 貼文吧！</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Podcast                                  -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-podcast" class="page">
+        <div class="page-header">
+          <h1>🎙️ Podcast 工廠</h1>
+          <p>選擇筆記生成雙人主持 Podcast</p>
+        </div>
+
+        <div class="grid-2">
+          <!-- Left: Generate Podcast -->
+          <div>
+            <!-- Note Selection -->
+            <div class="card">
+              <div class="card-header">
+                <div class="icon blue">📋</div>
+                <div>
+                  <h3>選擇筆記</h3>
+                  <p>勾選要轉為 Podcast 的筆記</p>
                 </div>
               </div>
-              <div class="audio-progress" id="podcastProgress" onclick="seekPodcast(event)">
-                <div class="audio-progress-bar" id="podcastProgressBar" style="width:0%"></div>
+              <div class="note-select-list" id="podcastNoteSelect">
+                <div class="empty-state" style="padding:20px">
+                  <p>尚無可用筆記</p>
+                </div>
+              </div>
+              <div class="flex gap-2">
+                <button class="btn btn-primary" id="btnGenScript" onclick="generateScript()" disabled>
+                  ✍️ 生成講稿
+                </button>
+                <button class="btn btn-success" id="btnGenAudio" onclick="generateAudio()" disabled
+                  style="display:none">
+                  🎤 生成音檔
+                </button>
               </div>
             </div>
-            <audio id="podcastAudio" preload="auto"></audio>
+
+            <!-- Script Preview -->
+            <div id="scriptSection" class="card" style="display:none">
+              <div class="card-header">
+                <div class="icon orange">📜</div>
+                <div>
+                  <h3>Podcast 講稿</h3>
+                  <p>雙人主持對話</p>
+                </div>
+              </div>
+              <div class="script-preview" id="scriptPreview"></div>
+            </div>
           </div>
 
-          <!-- Podcast History -->
-          <div class="card">
-            <div class="card-header">
-              <div class="icon purple">📚</div>
-              <div>
-                <h3>Podcast 列表</h3>
-                <p>已生成的 Podcast</p>
+          <!-- Right: Podcast List + Player -->
+          <div>
+            <!-- Active Player -->
+            <div class="card" id="podcastPlayerCard" style="display:none">
+              <div class="card-header">
+                <div class="icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);color:white">🎧</div>
+                <div>
+                  <h3>正在播放</h3>
+                  <p id="currentPodcastTitle">-</p>
+                </div>
               </div>
+              <div class="audio-player">
+                <div class="audio-player-top">
+                  <button class="audio-play-btn" id="podcastPlayBtn" onclick="togglePodcastPlay()">▶</button>
+                  <div class="audio-info">
+                    <div class="audio-title" id="podcastAudioTitle">-</div>
+                    <div class="audio-time">
+                      <span id="podcastCurrentTime">00:00</span> / <span id="podcastDuration">00:00</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="audio-progress" id="podcastProgress" onclick="seekPodcast(event)">
+                  <div class="audio-progress-bar" id="podcastProgressBar" style="width:0%"></div>
+                </div>
+              </div>
+              <audio id="podcastAudio" preload="auto"></audio>
             </div>
-            <div id="podcastList">
-              <div class="empty-state" style="padding:20px">
-                <div class="icon">🎵</div>
-                <p>尚未生成任何 Podcast</p>
+
+            <!-- Podcast History -->
+            <div class="card">
+              <div class="card-header">
+                <div class="icon purple">📚</div>
+                <div>
+                  <h3>Podcast 列表</h3>
+                  <p>已生成的 Podcast</p>
+                </div>
+              </div>
+              <div id="podcastList">
+                <div class="empty-state" style="padding:20px">
+                  <div class="icon">🎵</div>
+                  <p>尚未生成任何 Podcast</p>
+                </div>
               </div>
             </div>
           </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Settings                                 -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-settings" class="page">
+        <div class="page-header">
+          <h1>⚙️ 系統設定</h1>
+          <p>配置 API 金鑰與服務端點</p>
+        </div>
+
+        <div class="settings-grid">
+          <div class="settings-group">
+            <h4><span class="icon">✨</span> Gemini API</h4>
+            <div class="input-group">
+              <label>API Key</label>
+              <input type="password" id="settingGeminiKey" placeholder="AIza..." />
+            </div>
+            <div class="input-group">
+              <label>模型</label>
+              <select id="settingGeminiModel">
+                <option value="gemma-3-27b-it">gemma-3-27b-it</option>
+                <option value="gemini-2.0-flash">gemini-2.0-flash</option>
+                <option value="gemini-2.0-flash-lite">gemini-2.0-flash-lite</option>
+                <option value="gemini-1.5-flash">gemini-1.5-flash</option>
+                <option value="gemini-1.5-pro">gemini-1.5-pro</option>
+                <option value="gemini-2.5-flash-preview-05-20">gemini-2.5-flash-preview-05-20</option>
+                <option value="gemini-2.5-pro-preview-05-06">gemini-2.5-pro-preview-05-06</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h4><span class="icon">📝</span> HedgeDoc</h4>
+            <div class="input-group">
+              <label>伺服器 URL</label>
+              <input type="url" id="settingHedgedocUrl" placeholder="https://notes.example.com" />
+            </div>
+            <div class="input-group">
+              <label>Session Cookie</label>
+              <input type="password" id="settingHedgedocCookie" placeholder="connect.sid=s%3A..." />
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h4><span class="icon">🎤</span> Whisper API</h4>
+            <div class="input-group">
+              <label>API URL</label>
+              <input type="url" id="settingWhisperUrl" placeholder="http://localhost:8080" />
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h4><span class="icon">🔊</span> Kokoro TTS API</h4>
+            <div class="input-group">
+              <label>API URL</label>
+              <input type="url" id="settingKokoroUrl" placeholder="http://localhost:8880" />
+            </div>
+          </div>
+
+          <div class="settings-group" style="grid-column: 1 / -1">
+            <h4><span class="icon">𝕏</span> X (Twitter) Cookie</h4>
+            <div class="input-group">
+              <label>Cookie 字串（用於 xfetch 認證）</label>
+              <textarea id="settingXCookie" rows="3" placeholder="ct0=xxx; auth_token=xxx; ..."></textarea>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex gap-3 mt-4">
+          <button class="btn btn-primary" onclick="saveSettings()">
+            💾 儲存設定
+          </button>
+          <button class="btn btn-secondary" onclick="loadSettings()">
+            🔄 重新載入
+          </button>
         </div>
       </div>
     </div>
+  </div>
 
-    <!-- ═══════════════════════════════════════════════ -->
-    <!-- PAGE: Settings                                 -->
-    <!-- ═══════════════════════════════════════════════ -->
-    <div id="page-settings" class="page">
-      <div class="page-header">
-        <h1>⚙️ 系統設定</h1>
-        <p>配置 API 金鑰與服務端點</p>
-      </div>
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
 
-      <div class="settings-grid">
-        <div class="settings-group">
-          <h4><span class="icon">✨</span> Gemini API</h4>
-          <div class="input-group">
-            <label>API Key</label>
-            <input type="password" id="settingGeminiKey" placeholder="AIza..." />
-          </div>
-        </div>
-
-        <div class="settings-group">
-          <h4><span class="icon">📝</span> HedgeDoc</h4>
-          <div class="input-group">
-            <label>伺服器 URL</label>
-            <input type="url" id="settingHedgedocUrl" placeholder="https://notes.example.com" />
-          </div>
-          <div class="input-group">
-            <label>Session Cookie</label>
-            <input type="password" id="settingHedgedocCookie" placeholder="connect.sid=s%3A..." />
-          </div>
-        </div>
-
-        <div class="settings-group">
-          <h4><span class="icon">🎤</span> Whisper API</h4>
-          <div class="input-group">
-            <label>API URL</label>
-            <input type="url" id="settingWhisperUrl" placeholder="http://localhost:8080" />
-          </div>
-        </div>
-
-        <div class="settings-group">
-          <h4><span class="icon">🔊</span> Kokoro TTS API</h4>
-          <div class="input-group">
-            <label>API URL</label>
-            <input type="url" id="settingKokoroUrl" placeholder="http://localhost:8880" />
-          </div>
-        </div>
-
-        <div class="settings-group" style="grid-column: 1 / -1">
-          <h4><span class="icon">𝕏</span> X (Twitter) Cookie</h4>
-          <div class="input-group">
-            <label>Cookie 字串（用於 xfetch 認證）</label>
-            <textarea id="settingXCookie" rows="3" placeholder="ct0=xxx; auth_token=xxx; ..."></textarea>
-          </div>
-        </div>
-      </div>
-
-      <div class="flex gap-3 mt-4">
-        <button class="btn btn-primary" onclick="saveSettings()">
-          💾 儲存設定
-        </button>
-        <button class="btn btn-secondary" onclick="loadSettings()">
-          🔄 重新載入
-        </button>
-      </div>
+  <!-- Loading Overlay -->
+  <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-box">
+      <div class="spinner spinner-lg"></div>
+      <p id="loadingText">處理中...</p>
     </div>
   </div>
-</div>
 
-<!-- Toast Container -->
-<div class="toast-container" id="toastContainer"></div>
-
-<!-- Loading Overlay -->
-<div class="loading-overlay" id="loadingOverlay">
-  <div class="loading-box">
-    <div class="spinner spinner-lg"></div>
-    <p id="loadingText">處理中...</p>
-  </div>
-</div>
-
-<script src="app.js"></script>
+  <script src="app.js"></script>
 </body>
+
 </html>
