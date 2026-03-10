@@ -1,0 +1,20 @@
+{
+  "name": "kokoro_podcast",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "X Post Processor — 處理 X 貼文為中文筆記，生成 Podcast",
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "form-data": "^4.0.5",
+    "multer": "^2.1.1",
+    "node-fetch": "^2.7.0"
+  }
+}
