@@ -307,17 +307,20 @@ app.post('/api/x/parse', async (req, res) => {
           if (fxRes.ok) {
             const fxData = await fxRes.json();
             if (fxData.tweet) {
-              tweetText = fxData.tweet.text || '';
+              console.log('FxTwitter tweet keys:', Object.keys(fxData.tweet).join(', '));
+              tweetText = fxData.tweet.text ? String(fxData.tweet.text) : '';
               // For articles, also check for article_text or longer content fields
               if (fxData.tweet.article) {
-                tweetText = fxData.tweet.article.text || fxData.tweet.article.content || tweetText;
+                console.log('FxTwitter article keys:', Object.keys(fxData.tweet.article).join(', '));
+                const articleText = fxData.tweet.article.text || fxData.tweet.article.content || fxData.tweet.article.body;
+                if (articleText) tweetText = String(articleText);
               }
               if (fxData.tweet.media && fxData.tweet.media.videos && fxData.tweet.media.videos.length > 0) {
                 hasVideo = true;
               }
               if (tweetText) {
                 parseMethod = 'fxtwitter';
-                console.log(`FxTwitter parsed successfully from ${fxUrl}`);
+                console.log(`FxTwitter parsed successfully from ${fxUrl}, textLen=${tweetText.length}`);
               }
             }
           }
@@ -421,11 +424,17 @@ app.post('/api/x/parse', async (req, res) => {
       }
     }
 
+    // Ensure tweetText is always a string (some APIs may return objects)
+    if (tweetText && typeof tweetText !== 'string') {
+      try { tweetText = JSON.stringify(tweetText); } catch { tweetText = String(tweetText); }
+    }
+    if (!tweetText) tweetText = '';
+
     console.log(`Parse result: method=${parseMethod}, textLen=${tweetText.length}, hasVideo=${hasVideo}`);
 
     // ─── Try to fetch content from URLs in tweet text ───
     let fetchedUrlContent = '';
-    const urlsInText = tweetText.match(/https?:\/\/[^\s]+/g) || [];
+    const urlsInText = (typeof tweetText === 'string' ? tweetText.match(/https?:\/\/[^\s]+/g) : null) || [];
     // Also check the original URL for article links
     const allUrls = [...urlsInText];
     if (url.includes('/i/article/') || url.includes('/articles/')) {
