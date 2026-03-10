@@ -60,7 +60,7 @@ app.post('/api/settings', (req, res) => {
   res.json({ success: true, settings });
 });
 
-// ─── X Post Parse (yt-dlp + syndication API) ────────────────
+// ─── X Post Parse (yt-dlp + FxTwitter + syndication + oEmbed) ─
 app.post('/api/x/parse', async (req, res) => {
   try {
     const { url } = req.body;
@@ -96,11 +96,67 @@ app.post('/api/x/parse', async (req, res) => {
       hasVideo = true; // yt-dlp only succeeds if there is media
       parseMethod = 'yt-dlp';
     } catch (ytErr) {
-      // yt-dlp failed → likely no video, try to get text via other means
-      console.log('yt-dlp parse: no media found or error, trying syndication API...');
+      console.log('yt-dlp parse: no media found or error, trying other methods...');
     }
 
-    // Method 2: Twitter syndication API (public, no auth needed for text)
+    // Method 2: FxTwitter API (most reliable for text content)
+    if (!tweetText) {
+      try {
+        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+        const fxRes = await fetch(
+          `https://api.fxtwitter.com/${author}/status/${tweetId}`,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; bot)',
+              'Accept': 'application/json'
+            }
+          }
+        );
+        if (fxRes.ok) {
+          const fxData = await fxRes.json();
+          if (fxData.tweet) {
+            tweetText = fxData.tweet.text || '';
+            if (fxData.tweet.media && fxData.tweet.media.videos && fxData.tweet.media.videos.length > 0) {
+              hasVideo = true;
+            }
+            parseMethod = 'fxtwitter';
+            console.log('FxTwitter parsed successfully');
+          }
+        }
+      } catch (fxErr) {
+        console.log('FxTwitter API failed:', fxErr.message);
+      }
+    }
+
+    // Method 3: VxTwitter / FixupX API (alternative)
+    if (!tweetText) {
+      try {
+        const vxRes = await fetch(
+          `https://api.vxtwitter.com/${author}/status/${tweetId}`,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (compatible; bot)',
+              'Accept': 'application/json'
+            }
+          }
+        );
+        if (vxRes.ok) {
+          const vxData = await vxRes.json();
+          tweetText = vxData.text || '';
+          if (vxData.mediaURLs && vxData.mediaURLs.some(u => u.includes('.mp4') || u.includes('video'))) {
+            hasVideo = true;
+          }
+          if (tweetText) {
+            parseMethod = 'vxtwitter';
+            console.log('VxTwitter parsed successfully');
+          }
+        }
+      } catch (vxErr) {
+        console.log('VxTwitter API failed:', vxErr.message);
+      }
+    }
+
+    // Method 4: Twitter syndication API
     if (!tweetText) {
       try {
         const synRes = await fetch(
@@ -118,37 +174,54 @@ app.post('/api/x/parse', async (req, res) => {
           if (synData.mediaDetails && synData.mediaDetails.some(m => m.type === 'video')) {
             hasVideo = true;
           }
-          parseMethod = 'syndication';
+          if (tweetText) {
+            parseMethod = 'syndication';
+            console.log('Syndication API parsed successfully');
+          }
         }
       } catch (synErr) {
         console.log('Syndication API failed:', synErr.message);
       }
     }
 
-    // Method 3: Twitter oEmbed API (always public, but limited info)
+    // Method 5: Twitter oEmbed API (last resort — limited info)
     if (!tweetText) {
       try {
         const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`;
         const oeRes = await fetch(oembedUrl);
         if (oeRes.ok) {
           const oeData = await oeRes.json();
-          // Extract text from HTML
+          // Extract text from the blockquote content (skip the author link at the end)
           const htmlContent = oeData.html || '';
-          tweetText = htmlContent
-            .replace(/<[^>]*>/g, ' ')
-            .replace(/&amp;/g, '&')
-            .replace(/&lt;/g, '<')
-            .replace(/&gt;/g, '>')
-            .replace(/&quot;/g, '"')
-            .replace(/&#39;/g, "'")
-            .replace(/\s+/g, ' ')
-            .trim();
-          parseMethod = 'oembed';
+          // Get only the <p> content inside <blockquote>
+          const pMatch = htmlContent.match(/<blockquote[^>]*>.*?<p[^>]*>([\s\S]*?)<\/p>/i);
+          let extractedText = '';
+          if (pMatch) {
+            extractedText = pMatch[1]
+              .replace(/<br\s*\/?>/gi, '\n')
+              .replace(/<a[^>]*>(.*?)<\/a>/gi, '$1')
+              .replace(/<[^>]*>/g, '')
+              .replace(/&amp;/g, '&')
+              .replace(/&lt;/g, '<')
+              .replace(/&gt;/g, '>')
+              .replace(/&quot;/g, '"')
+              .replace(/&#39;/g, "'")
+              .replace(/https?:\/\/t\.co\/\S+/g, '')  // remove t.co links
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
+          if (extractedText && extractedText.length > 5) {
+            tweetText = extractedText;
+            parseMethod = 'oembed';
+            console.log('oEmbed parsed successfully');
+          }
         }
       } catch (oeErr) {
         console.log('oEmbed API failed:', oeErr.message);
       }
     }
+
+    console.log(`Parse result: method=${parseMethod}, textLen=${tweetText.length}, hasVideo=${hasVideo}`);
 
     res.json({
       success: true,
