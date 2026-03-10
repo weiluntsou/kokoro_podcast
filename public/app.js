@@ -817,12 +817,16 @@ async function pollTaskStatus(taskId, podcastEntry, queueTaskId) {
             } else if (data.status === 'failed' || data.status === 'error') {
                 throw new Error(data.error || '語音生成任務失敗');
             } else {
+                const progress_percent = Math.round(data.progress_percent || data.progress || 0);
+                const current_step = data.current_step || data.step || 0;
+                const total_steps = data.total_steps || 0;
+
                 const mins = Math.floor(elapsed / 60);
                 const secs = elapsed % 60;
 
                 const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
                 if (queueTaskId) {
-                    TaskQueue.updateTask(queueTaskId, `Kokoro 語音生成中... ${timeStr}\\n狀態: ${data.status || 'processing'}`);
+                    TaskQueue.updateTask(queueTaskId, `任務生成中... ${timeStr}<br>進度：${progress_percent}% (${current_step}/${total_steps})`);
                 }
             }
         } catch (e) {

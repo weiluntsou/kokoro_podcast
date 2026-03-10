@@ -1020,7 +1020,14 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
     if (!statusRes.ok) throw new Error(`Task status API: ${statusRes.status}`);
 
     const statusData = await statusRes.json();
-    console.log(`Task ${taskId} status:`, statusData.status);
+    if (statusData.status === 'processing') {
+      const progress_percent = statusData.progress_percent || statusData.progress || 0;
+      const current_step = statusData.current_step || statusData.step || 0;
+      const total_steps = statusData.total_steps || 0;
+      console.log(`Task ${taskId} 正在生成中... 目前進度：${progress_percent}% (${current_step}/${total_steps})`);
+    } else {
+      console.log(`Task ${taskId} status:`, statusData.status);
+    }
 
     // If task is completed, download the audio file(s) and save locally
     if (statusData.status === 'completed') {
