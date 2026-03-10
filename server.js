@@ -948,17 +948,15 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
       throw new Error('無法解析講稿格式，請確認為 Python List 格式');
     }
 
-    // Generate filename from title
-    const filename = (title || 'podcast')
-      .replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_')
-      .replace(/_+/g, '_')
-      .substring(0, 50) || 'podcast';
-
-    console.log(`Sending to Kokoro: filename=${filename}, segments=${scriptData.length}`);
-
-    // Send to Kokoro generate_podcast API
     // Ensure we don't include /v1 in the base URL for these custom endpoints
     const kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
+
+    // Generate filename strictly as English alphanumeric (Kokoro API requirement)
+    const filename = `podcast_${Date.now()}`;
+
+    console.log(`Sending to Kokoro: url=${kokoroBaseUrl}/generate_podcast, filename=${filename}, segments=${scriptData.length}`);
+
+    // Send to Kokoro generate_podcast API
 
     const kokoroRes = await fetch(`${kokoroBaseUrl}/generate_podcast`, {
       method: 'POST',
