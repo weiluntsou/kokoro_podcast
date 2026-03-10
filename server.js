@@ -59,69 +59,116 @@ app.post('/api/settings', (req, res) => {
   res.json({ success: true, settings });
 });
 
-// ─── X Post Parse (xfetch) ───────────────────────────────────
+// ─── X Post Parse (yt-dlp + syndication API) ────────────────
 app.post('/api/x/parse', async (req, res) => {
   try {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: '缺少 URL' });
 
-    // Extract tweet ID from URL
-    const match = url.match(/status\/(\d+)/);
+    // Extract tweet ID and author from URL
+    const match = url.match(/(?:x\.com|twitter\.com)\/(\w+)\/status\/(\d+)/);
     if (!match) return res.status(400).json({ error: '無效的 X 貼文連結' });
-    const tweetId = match[1];
+    const author = match[1];
+    const tweetId = match[2];
 
     const settings = getSettings();
+    let tweetText = '';
+    let hasVideo = false;
+    let parseMethod = '';
 
-    // Set cookie env for xfetch if available
-    let envVars = { ...process.env };
-    if (settings.xCookie) {
-      envVars.X_COOKIE = settings.xCookie;
-    }
-
-    // Use xfetch to get tweet data
-    const result = execSync(`npx -y @lxgic/xfetch tweet ${tweetId} --format json`, {
-      env: envVars,
-      encoding: 'utf-8',
-      timeout: 30000
-    });
-
-    let tweetData;
+    // Method 1: Try yt-dlp --dump-json (works well & detects video)
     try {
-      tweetData = JSON.parse(result);
-    } catch {
-      // Try parsing line by line (JSONL)
-      const lines = result.trim().split('\n').filter(l => l.trim());
-      tweetData = JSON.parse(lines[lines.length - 1]);
+      let cookieArgs = '';
+      if (settings.xCookie) {
+        const cookieFile = path.join(DATA_DIR, 'x_cookies.txt');
+        fs.writeFileSync(cookieFile, settings.xCookie, 'utf-8');
+        cookieArgs = `--cookies "${cookieFile}"`;
+      }
+
+      const result = execSync(
+        `yt-dlp ${cookieArgs} --dump-json --no-download "${url}" 2>/dev/null`,
+        { encoding: 'utf-8', timeout: 30000 }
+      );
+
+      const info = JSON.parse(result);
+      tweetText = info.description || info.title || '';
+      hasVideo = true; // yt-dlp only succeeds if there is media
+      parseMethod = 'yt-dlp';
+    } catch (ytErr) {
+      // yt-dlp failed → likely no video, try to get text via other means
+      console.log('yt-dlp parse: no media found or error, trying syndication API...');
     }
 
-    // Determine if tweet has video
-    const hasVideo = !!(
-      tweetData?.media?.some(m => m.type === 'video' || m.type === 'animated_gif') ||
-      tweetData?.extended_entities?.media?.some(m => m.type === 'video') ||
-      tweetData?.video_url
-    );
+    // Method 2: Twitter syndication API (public, no auth needed for text)
+    if (!tweetText) {
+      try {
+        const synRes = await fetch(
+          `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=zh-tw&token=0`,
+          {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+              'Accept': 'application/json'
+            }
+          }
+        );
+        if (synRes.ok) {
+          const synData = await synRes.json();
+          tweetText = synData.text || synData.full_text || '';
+          if (synData.mediaDetails && synData.mediaDetails.some(m => m.type === 'video')) {
+            hasVideo = true;
+          }
+          parseMethod = 'syndication';
+        }
+      } catch (synErr) {
+        console.log('Syndication API failed:', synErr.message);
+      }
+    }
+
+    // Method 3: Twitter oEmbed API (always public, but limited info)
+    if (!tweetText) {
+      try {
+        const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`;
+        const oeRes = await fetch(oembedUrl);
+        if (oeRes.ok) {
+          const oeData = await oeRes.json();
+          // Extract text from HTML
+          const htmlContent = oeData.html || '';
+          tweetText = htmlContent
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim();
+          parseMethod = 'oembed';
+        }
+      } catch (oeErr) {
+        console.log('oEmbed API failed:', oeErr.message);
+      }
+    }
 
     res.json({
       success: true,
       tweet: {
         id: tweetId,
-        text: tweetData?.full_text || tweetData?.text || tweetData?.tweet_text || '',
-        author: tweetData?.user?.screen_name || tweetData?.author || tweetData?.username || 'unknown',
+        text: tweetText,
+        author: author,
         hasVideo,
         url,
-        raw: tweetData
+        parseMethod
       }
     });
   } catch (error) {
     console.error('X parse error:', error.message);
-    // Fallback: return basic info
-    const match = req.body.url?.match(/status\/(\d+)/);
+    const match = req.body.url?.match(/(?:x\.com|twitter\.com)\/(\w+)\/status\/(\d+)/);
     res.json({
       success: true,
       tweet: {
-        id: match?.[1] || 'unknown',
+        id: match?.[2] || 'unknown',
         text: '',
-        author: '',
+        author: match?.[1] || '',
         hasVideo: false,
         url: req.body.url,
         parseError: error.message
