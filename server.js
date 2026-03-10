@@ -66,16 +66,23 @@ app.post('/api/x/parse', async (req, res) => {
     const { url } = req.body;
     if (!url) return res.status(400).json({ error: '缺少 URL' });
 
-    // Extract tweet ID and author from URL
-    const match = url.match(/(?:x\.com|twitter\.com)\/(\w+)\/status\/(\d+)/);
-    if (!match) return res.status(400).json({ error: '無效的 X 貼文連結' });
-    const author = match[1];
-    const tweetId = match[2];
+    // Extract tweet ID and author from URL (support both /status/ and /article/)
+    const match = url.match(/(?:x\.com|twitter\.com)\/(\w+)\/(?:status|article)\/(\d+)/);
+    // Also support /i/article/ format
+    const articleMatch = !match && url.match(/(?:x\.com|twitter\.com)\/i\/article\/(\d+)/);
+    if (!match && !articleMatch) return res.status(400).json({ error: '無效的 X 貼文連結' });
+    const author = match ? match[1] : '';
+    const tweetId = match ? match[2] : articleMatch[1];
+    const isArticle = url.includes('/article/');
 
     const settings = getSettings();
     let tweetText = '';
     let hasVideo = false;
     let parseMethod = '';
+
+    if (isArticle) {
+      console.log(`Detected X Article URL, ID: ${tweetId}`);
+    }
 
     // Method 1: Try yt-dlp --dump-json (works well & detects video)
     try {
@@ -99,40 +106,233 @@ app.post('/api/x/parse', async (req, res) => {
       console.log('yt-dlp parse: no media found or error, trying other methods...');
     }
 
-    // Method 2: FxTwitter API (most reliable for text content)
+    // Method 2: X API with Cookie authentication (uses your configured cookie)
+    if (!tweetText && settings.xCookie) {
+      // Extract ct0 (CSRF token) from cookie
+      const ct0Match = settings.xCookie.match(/ct0=([^;\s]+)/);
+      const csrfToken = ct0Match ? ct0Match[1] : '';
+
+      if (csrfToken) {
+        const xHeaders = {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Cookie': settings.xCookie,
+          'x-csrf-token': csrfToken,
+          'authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs=1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
+          'x-twitter-active-user': 'yes',
+          'x-twitter-auth-type': 'OAuth2Session',
+          'Accept': 'application/json'
+        };
+
+        // 2a: Try Twitter API v1.1 (works for regular tweets)
+        if (!isArticle) {
+          try {
+            console.log('Trying X API v1.1 with cookie...');
+            const xApiRes = await fetch(
+              `https://api.x.com/1.1/statuses/show.json?id=${tweetId}&tweet_mode=extended`,
+              { headers: xHeaders }
+            );
+            if (xApiRes.ok) {
+              const xData = await xApiRes.json();
+              tweetText = xData.full_text || xData.text || '';
+              if (xData.extended_entities && xData.extended_entities.media) {
+                hasVideo = xData.extended_entities.media.some(m => m.type === 'video' || m.type === 'animated_gif');
+              }
+              if (tweetText) {
+                parseMethod = 'x-api-v1.1';
+                console.log(`X API v1.1 parsed successfully, textLen=${tweetText.length}`);
+              }
+            } else {
+              console.log(`X API v1.1 returned ${xApiRes.status}`);
+            }
+          } catch (xErr) {
+            console.log('X API v1.1 failed:', xErr.message);
+          }
+        }
+
+        // 2b: Try X GraphQL TweetDetail API (works for tweets and articles)
+        if (!tweetText) {
+          try {
+            console.log('Trying X GraphQL TweetDetail with cookie...');
+            const variables = JSON.stringify({
+              tweetId: tweetId,
+              withCommunity: false,
+              includePromotedContent: false,
+              withVoice: false
+            });
+            const features = JSON.stringify({
+              creator_subscriptions_tweet_preview_api_enabled: true,
+              communities_web_enable_tweet_community_results_fetch: true,
+              c9s_tweet_anatomy_moderator_badge_enabled: true,
+              articles_preview_enabled: true,
+              responsive_web_edit_tweet_api_enabled: true,
+              graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+              view_counts_everywhere_api_enabled: true,
+              longform_notetweets_consumption_enabled: true,
+              responsive_web_twitter_article_tweet_consumption_enabled: true,
+              tweet_awards_web_tipping_enabled: false,
+              creator_subscriptions_quote_tweet_preview_enabled: false,
+              freedom_of_speech_not_reach_fetch_enabled: true,
+              standardized_nudges_misinfo: true,
+              tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+              rweb_video_timestamps_enabled: true,
+              longform_notetweets_rich_text_read_enabled: true,
+              longform_notetweets_inline_media_enabled: true,
+              responsive_web_enhance_cards_enabled: false
+            });
+
+            const gqlRes = await fetch(
+              `https://x.com/i/api/graphql/xOhkmRac04YFZmOzU9PJHg/TweetResultByRestId?variables=${encodeURIComponent(variables)}&features=${encodeURIComponent(features)}`,
+              { headers: xHeaders }
+            );
+
+            if (gqlRes.ok) {
+              const gqlData = await gqlRes.json();
+              // Navigate the GraphQL response structure
+              const tweetResult = gqlData?.data?.tweetResult?.result;
+              if (tweetResult) {
+                const legacy = tweetResult.legacy || tweetResult.tweet?.legacy;
+                if (legacy) {
+                  tweetText = legacy.full_text || '';
+                }
+                // Check for article/note content
+                const noteText = tweetResult.note_tweet?.note_tweet_results?.result?.text;
+                if (noteText) {
+                  tweetText = noteText;
+                }
+                // Check for article content
+                if (tweetResult.article || tweetResult.tweet?.article) {
+                  const article = tweetResult.article || tweetResult.tweet?.article;
+                  if (article.content) tweetText = article.content;
+                  if (article.body) tweetText = article.body;
+                  if (article.text) tweetText = article.text;
+                }
+                if (tweetText) {
+                  parseMethod = 'x-graphql';
+                  console.log(`X GraphQL parsed successfully, textLen=${tweetText.length}`);
+                }
+              }
+            } else {
+              console.log(`X GraphQL returned ${gqlRes.status}`);
+            }
+          } catch (gqlErr) {
+            console.log('X GraphQL failed:', gqlErr.message);
+          }
+        }
+
+        // 2c: For articles, also try fetching the page HTML with cookies
+        if (!tweetText && isArticle) {
+          try {
+            console.log('Trying to fetch article page with cookie...');
+            const pageRes = await fetch(url, {
+              headers: {
+                ...xHeaders,
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+              },
+              redirect: 'follow'
+            });
+            if (pageRes.ok) {
+              const pageHtml = await pageRes.text();
+
+              // Try to extract __NEXT_DATA__ or embedded JSON
+              const nextDataMatch = pageHtml.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+              if (nextDataMatch) {
+                try {
+                  const nextData = JSON.parse(nextDataMatch[1]);
+                  // Try to find article content in the nested data
+                  const jsonStr = JSON.stringify(nextData);
+                  // Look for content/body/text fields
+                  const bodyMatch = jsonStr.match(/"body":"((?:[^"\\]|\\.)*)"/);
+                  const contentMatch = jsonStr.match(/"content":"((?:[^"\\]|\\.)*)"/);
+                  if (bodyMatch) tweetText = JSON.parse(`"${bodyMatch[1]}"`);
+                  else if (contentMatch) tweetText = JSON.parse(`"${contentMatch[1]}"`);
+                } catch { }
+              }
+
+              // Try to extract from script tags containing tweet data
+              if (!tweetText) {
+                const scriptMatches = pageHtml.match(/<script[^>]*>[\s\S]*?"full_text"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+                if (scriptMatches) {
+                  try {
+                    tweetText = JSON.parse(`"${scriptMatches[1]}"`);
+                  } catch { }
+                }
+              }
+
+              // Try to extract og:description as fallback
+              if (!tweetText) {
+                const ogMatch = pageHtml.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([\s\S]*?)["']/i);
+                if (ogMatch && ogMatch[1].length > 20) {
+                  tweetText = ogMatch[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+                }
+              }
+
+              if (tweetText) {
+                parseMethod = 'x-page-cookie';
+                console.log(`Article page parsed with cookie, textLen=${tweetText.length}`);
+              }
+            }
+          } catch (pageErr) {
+            console.log('Article page fetch failed:', pageErr.message);
+          }
+        }
+      } else {
+        console.log('X Cookie found but no ct0 CSRF token detected. Cookie format should include ct0=xxx');
+      }
+    }
+
+    // Method 3: FxTwitter API (most reliable for text content)
     if (!tweetText) {
-      try {
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-        const fxRes = await fetch(
-          `https://api.fxtwitter.com/${author}/status/${tweetId}`,
-          {
+      // Try multiple FxTwitter URL patterns
+      const fxUrls = [];
+      if (author) {
+        fxUrls.push(`https://api.fxtwitter.com/${author}/status/${tweetId}`);
+      }
+      // For articles, also try direct ID access
+      fxUrls.push(`https://api.fxtwitter.com/i/status/${tweetId}`);
+      if (isArticle) {
+        fxUrls.push(`https://api.fxtwitter.com/${author || 'i'}/article/${tweetId}`);
+      }
+
+      for (const fxUrl of fxUrls) {
+        if (tweetText) break;
+        try {
+          process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+          console.log(`Trying FxTwitter: ${fxUrl}`);
+          const fxRes = await fetch(fxUrl, {
             headers: {
               'User-Agent': 'Mozilla/5.0 (compatible; bot)',
               'Accept': 'application/json'
             }
-          }
-        );
-        if (fxRes.ok) {
-          const fxData = await fxRes.json();
-          if (fxData.tweet) {
-            tweetText = fxData.tweet.text || '';
-            if (fxData.tweet.media && fxData.tweet.media.videos && fxData.tweet.media.videos.length > 0) {
-              hasVideo = true;
+          });
+          if (fxRes.ok) {
+            const fxData = await fxRes.json();
+            if (fxData.tweet) {
+              tweetText = fxData.tweet.text || '';
+              // For articles, also check for article_text or longer content fields
+              if (fxData.tweet.article) {
+                tweetText = fxData.tweet.article.text || fxData.tweet.article.content || tweetText;
+              }
+              if (fxData.tweet.media && fxData.tweet.media.videos && fxData.tweet.media.videos.length > 0) {
+                hasVideo = true;
+              }
+              if (tweetText) {
+                parseMethod = 'fxtwitter';
+                console.log(`FxTwitter parsed successfully from ${fxUrl}`);
+              }
             }
-            parseMethod = 'fxtwitter';
-            console.log('FxTwitter parsed successfully');
           }
+        } catch (fxErr) {
+          console.log(`FxTwitter failed for ${fxUrl}:`, fxErr.message);
         }
-      } catch (fxErr) {
-        console.log('FxTwitter API failed:', fxErr.message);
       }
     }
 
-    // Method 3: VxTwitter / FixupX API (alternative)
+    // Method 4: VxTwitter / FixupX API (alternative)
     if (!tweetText) {
+      const vxAuthor = author || 'i';
       try {
         const vxRes = await fetch(
-          `https://api.vxtwitter.com/${author}/status/${tweetId}`,
+          `https://api.vxtwitter.com/${vxAuthor}/status/${tweetId}`,
           {
             headers: {
               'User-Agent': 'Mozilla/5.0 (compatible; bot)',
@@ -156,7 +356,7 @@ app.post('/api/x/parse', async (req, res) => {
       }
     }
 
-    // Method 4: Twitter syndication API
+    // Method 5: Twitter syndication API
     if (!tweetText) {
       try {
         const synRes = await fetch(
@@ -184,7 +384,7 @@ app.post('/api/x/parse', async (req, res) => {
       }
     }
 
-    // Method 5: Twitter oEmbed API (last resort — limited info)
+    // Method 6: Twitter oEmbed API (last resort — limited info)
     if (!tweetText) {
       try {
         const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`;
@@ -317,7 +517,8 @@ app.post('/api/x/parse', async (req, res) => {
     });
   } catch (error) {
     console.error('X parse error:', error.message);
-    const match = req.body.url?.match(/(?:x\.com|twitter\.com)\/(\w+)\/status\/(\d+)/);
+    const match = req.body.url?.match(/(?:x\.com|twitter\.com)\/(\w+)\/(?:status|article)\/(\d+)/)
+      || req.body.url?.match(/(?:x\.com|twitter\.com)\/i\/article\/(\d+)/);
     res.json({
       success: true,
       tweet: {
@@ -454,10 +655,12 @@ app.post('/api/gemini/summarize', async (req, res) => {
       ? req.body.prompt
       : `你是一位專業的筆記整理助手。你的任務是根據以下提供的內容，直接整理成繁體中文筆記。
 
-嚴格規則：
+嚴格規則（必須遵守）：
 - 你必須直接輸出整理好的筆記，不可以回覆任何對話、提問或要求更多資訊
 - 不要說「請提供連結」或「請貼上內容」之類的話
-- 如果內容較少，就根據現有內容盡量整理
+- 嚴禁捏造、幻想或編造任何不在原始內容中的資訊
+- 只能根據下方提供的原始內容進行整理，不可以自行補充你認為可能的內容
+- 如果原始內容太少無法整理成有意義的筆記，就直接輸出：「⚠️ 原始內容不足，無法生成完整筆記。」並附上原始內容
 - 直接以 Markdown 格式輸出筆記內容
 
 格式要求：
@@ -473,7 +676,7 @@ app.post('/api/gemini/summarize', async (req, res) => {
 ${content}
 ---
 
-請直接輸出整理好的 Markdown 筆記：`;
+請直接根據上述原始內容輸出整理好的 Markdown 筆記（禁止編造內容）：`;
 
     const model = settings.geminiModel || 'gemma-3-27b-it';
     const geminiRes = await fetch(

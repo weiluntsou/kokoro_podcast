@@ -210,6 +210,13 @@ async function processPost() {
 
         // Step 3: Generate note via Gemini
         setStep('note');
+
+        // Check content quality - strip URLs and whitespace to measure real text
+        const textOnly = contentForNote.replace(/https?:\/\/\S+/g, '').replace(/[@#]\w+/g, '').trim();
+        if (textOnly.length < 20) {
+            showToast('⚠️ 貼文內容較少，筆記品質可能受限', 'info');
+        }
+
         showLoading('生成中文筆記中...');
 
         const noteRes = await fetch(`${API}/api/gemini/summarize`, {
