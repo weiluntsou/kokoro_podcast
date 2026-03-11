@@ -1004,10 +1004,10 @@ IMPORTANT: A normal speaking rate is about 200 words per minute. To hit the ${nu
 ⚠️ 重要要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${numMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${targetWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與寒暄，來擴充內容長度，切忌空洞重複。`;
 
     const prompt = `${subPrompt}
-⚠️ 嚴格輸出限制：你必須『只』輸出一個 Python List 格式，不要包含 Markdown 標記 (如 \`\`\`python )，不要前言結語。格式範例：
+⚠️ 嚴格輸出限制：你必須『只』輸出一個合法的 JSON Array 陣列格式，絕對不要包含 Markdown 標記 (如 \`\`\`json )，不要前言結語。內容請使用標準雙引號 (") 以及正確的跳脫字元！格式範例：
 [
-    ("host_f", "大家好..."),
-    ("host_m", "沒錯...")
+    ["host_f", "大家好..."],
+    ["host_m", "沒錯..."]
 ]
 
 內容標題：${noteTitle || '未命名'}
@@ -1035,7 +1035,7 @@ ${noteContents}`;
     let script = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     // Clean up: remove markdown code block markers if present
-    script = script.replace(/^```(?:python)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    script = script.replace(/^```(?:json|python|javascript)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
     res.json({ success: true, script });
   } catch (error) {
@@ -1053,29 +1053,35 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     const settings = getSettings();
     const podcastId = Date.now().toString();
 
-    // Parse the Python List script into a JS array for the API
+    // Parse the script into a JS array
     let scriptData;
     try {
-      // Convert Python tuple format to JSON array format
-      // ("host_f", "text") -> ["host_f", "text"]
-      const jsonStr = script
-        .replace(/\(/g, '[')
-        .replace(/\)/g, ']')
-        .replace(/'/g, '"');
-      scriptData = JSON.parse(jsonStr);
+      // First attempt: clean parse directly (since we prompted for JSON)
+      const cleanJson = script.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+      scriptData = JSON.parse(cleanJson);
     } catch (parseErr) {
-      console.error('Script parse error, trying regex extraction:', parseErr.message);
-      // Fallback: extract tuples using regex
-      scriptData = [];
-      const tupleRegex = /\(\s*["'](\w+)["']\s*,\s*["']((?:[^"'\\]|\\.)*)["']\s*\)/g;
-      let match;
-      while ((match = tupleRegex.exec(script)) !== null) {
-        scriptData.push([match[1], match[2].replace(/\\"/g, '"').replace(/\\'/g, "'")]);
+      console.error('Clean JSON parse failed, trying fallback replacements:', parseErr.message);
+      try {
+        // Fallback: maybe they output python tuples?
+        const jsonStr = script
+          .replace(/\(/g, '[')
+          .replace(/\)/g, ']')
+          .replace(/'/g, '"');
+        scriptData = JSON.parse(jsonStr);
+      } catch (fallbackErr) {
+          console.error('Fallback JSON parse also failed, trying regex extraction:', fallbackErr.message);
+          scriptData = [];
+          // More robust fallback regex to grab everything between quotes after host_[fm]
+          const fallbackRegex = /\[\s*["'](host_[fm])["']\s*,\s*["']([\s\S]*?)["']\s*\]/g;
+          let match;
+          while ((match = fallbackRegex.exec(script.replace(/\(/g, '[').replace(/\)/g, ']'))) !== null) {
+            scriptData.push([match[1], match[2].replace(/\\"/g, '"').replace(/\\'/g, "'")]);
+          }
       }
     }
 
     if (!scriptData || scriptData.length === 0) {
-      throw new Error('無法解析講稿格式，請確認為 Python List 格式');
+      throw new Error('無法解析講稿格式，請確認是否為正確的 JSON 代碼');
     }
 
     // Assign voices based on language

@@ -910,16 +910,26 @@ function showScriptPreview(script) {
     const preview = document.getElementById('scriptPreview');
     section.style.display = 'block';
 
-    const tupleRegex = /\(\s*["'](host_[fm])["']\s*,\s*["']((?:[^"'\\]|\\.)*)["']\s*\)/g;
-    let match;
-    const lines = [];
-
-    while ((match = tupleRegex.exec(script)) !== null) {
-        const speaker = match[1];
-        const text = match[2].replace(/\\"/g, '"').replace(/\\'/g, "'");
-        const displayName = speaker === 'host_f' ? '曉曉(F)' : '雲健(M)';
-        const cssClass = speaker === 'host_f' ? 'speaker-a' : 'speaker-b';
-        lines.push(`<div><span class="${cssClass}">${displayName}：</span>${escapeHtml(text)}</div>`);
+    // Try to parse the script as JSON array, fallback to simple regex
+    try {
+        const jsonScript = script.replace(/^```(?:json|python|javascript)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+        const data = JSON.parse(jsonScript);
+        data.forEach(([speaker, text]) => {
+            const displayName = speaker === 'host_f' ? '曉曉(F)' : '雲健(M)';
+            const cssClass = speaker === 'host_f' ? 'speaker-a' : 'speaker-b';
+            lines.push(`<div><span class="${cssClass}">${displayName}：</span>${escapeHtml(text)}</div>`);
+        });
+    } catch (e) {
+        // Fallback robust regex
+        const fallbackRegex = /\[\s*["'](host_[fm])["']\s*,\s*["']([\s\S]*?)["']\s*\]/g;
+        let match;
+        while ((match = fallbackRegex.exec(script.replace(/\(/g, '[').replace(/\)/g, ']'))) !== null) {
+            const speaker = match[1];
+            const text = match[2].replace(/\\"/g, '"').replace(/\\'/g, "'");
+            const displayName = speaker === 'host_f' ? '曉曉(F)' : '雲健(M)';
+            const cssClass = speaker === 'host_f' ? 'speaker-a' : 'speaker-b';
+            lines.push(`<div><span class="${cssClass}">${displayName}：</span>${escapeHtml(text)}</div>`);
+        }
     }
 
     if (lines.length === 0) {
