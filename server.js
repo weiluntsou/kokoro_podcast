@@ -1228,23 +1228,29 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
 
           for (let i = 0; i < urlsToDownload.length; i++) {
             let url = urlsToDownload[i];
+            
+            // If url is literally just the path like /download/xxx, prepend kokoroBaseUrl correctly
+            const cleanBaseUrl = kokoroBaseUrl.replace(/\/+$/, '');
+            const cleanUrlPath = url.replace(/^\/+/, '');
             const audioUrl = url.startsWith('http')
               ? url
-              : `${kokoroBaseUrl}${url.startsWith('/') ? '' : '/'}${url}`;
+              : `${cleanBaseUrl}/${cleanUrlPath}`;
 
             try {
+              console.log(`Downloading audio chunk from: ${audioUrl}`);
               const audioRes = await fetch(audioUrl);
               if (audioRes.ok) {
                 const buffer = await audioRes.buffer();
-                const ext = audioUrl.match(/\.(\w+)(?:[\?#]|$)/)?.[1] || 'mp3';
+                const ext = audioUrl.match(/\.(\w+)(?:[\?#]|$)/)?.[1] || 'wav';
                 const tempFile = path.join(AUDIO_DIR, `temp_${podcast.id}_${i}.${ext}`);
                 fs.writeFileSync(tempFile, buffer);
                 downloadedFiles.push(tempFile);
+                console.log(`Successfully downloaded chunk to ${tempFile}`);
               } else {
-                console.error(`Status ${audioRes.status} downloading ${audioUrl}`);
+                console.error(`Status ${audioRes.status} downloading ${audioUrl} - Check if Kokoro container is accessible from this network.`);
               }
             } catch (dlErr) {
-              console.error('Audio download error:', dlErr.message);
+              console.error(`Audio download error from ${audioUrl}:`, dlErr.message);
             }
           }
 
