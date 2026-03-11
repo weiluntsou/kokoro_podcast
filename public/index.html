@@ -19,6 +19,10 @@
         📝
         <span class="tooltip">處理貼文</span>
       </button>
+      <button class="nav-btn" data-page="video" id="nav-video" onclick="switchPage('video')">
+        🎬
+        <span class="tooltip">影片工具</span>
+      </button>
       <button class="nav-btn" data-page="notes" id="nav-notes" onclick="switchPage('notes')">
         📋
         <span class="tooltip">筆記列表</span>
@@ -115,6 +119,33 @@
           </div>
         </div>
 
+
+
+        <!-- Note Result -->
+        <div id="noteResult" class="card" style="display:none">
+          <div class="card-header">
+            <div class="icon green">📝</div>
+            <div>
+              <h3>生成的筆記</h3>
+              <p id="noteResultUrl"></p>
+            </div>
+            <a id="noteLink" href="#" target="_blank" class="btn btn-success btn-sm" style="margin-left:auto">
+              🔗 開啟 HedgeDoc
+            </a>
+          </div>
+          <div class="md-preview" id="noteContent"></div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Video Tools                              -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-video" class="page">
+        <div class="page-header">
+          <h1>🎬 影片工具</h1>
+          <p>下載影片，進行語音辨識並生成逐字稿筆記</p>
+        </div>
+
         <!-- Download URL (standalone) -->
         <div class="card">
           <div class="card-header">
@@ -135,24 +166,31 @@
               ▶️
             </button>
           </div>
-          <div class="video-container" id="directVideoContainer" style="display:none">
+          
+          <div id="videoActionContainer" style="display:none; margin-top:15px; text-align:right;">
+             <button class="btn btn-primary" onclick="enqueueVideoToNote()">
+               📝 將此影片轉為筆記
+             </button>
+          </div>
+
+          <div class="video-container" id="directVideoContainer" style="display:none; margin-top:15px;">
             <video id="directVideoPlayer" controls></video>
           </div>
         </div>
-
-        <!-- Note Result -->
-        <div id="noteResult" class="card" style="display:none">
+        
+        <!-- Video Note Result -->
+        <div id="videoNoteResult" class="card" style="display:none">
           <div class="card-header">
             <div class="icon green">📝</div>
             <div>
-              <h3>生成的筆記</h3>
-              <p id="noteResultUrl"></p>
+              <h3>生成的影片筆記</h3>
+              <p id="videoNoteResultUrl"></p>
             </div>
-            <a id="noteLink" href="#" target="_blank" class="btn btn-success btn-sm" style="margin-left:auto">
+            <a id="videoNoteLink" href="#" target="_blank" class="btn btn-success btn-sm" style="margin-left:auto">
               🔗 開啟 HedgeDoc
             </a>
           </div>
-          <div class="md-preview" id="noteContent"></div>
+          <div class="md-preview" id="videoNoteContent"></div>
         </div>
       </div>
 

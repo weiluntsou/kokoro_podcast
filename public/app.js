@@ -8,6 +8,8 @@ const API = '';
 let currentTweet = null;
 let currentVideoPath = null;
 let currentDirectVideoPath = null;
+let currentDirectVideoFilename = null;
+let currentDirectVideoUrl = null;
 let currentScript = null;
 let selectedNoteIds = new Set();
 let currentPodcastId = null;
@@ -220,6 +222,22 @@ const TaskQueue = {
         showToast('已加入下載佇列', 'success');
     },
 
+    addVideoNoteTask() {
+        if (!currentDirectVideoFilename) return;
+        const task = {
+            id: ++this.taskIdCounter,
+            type: 'video-note',
+            name: `影片轉筆記`,
+            status: 'pending',
+            progress: '排隊中...',
+            data: { filename: currentDirectVideoFilename, url: currentDirectVideoUrl }
+        };
+        this.queue.push(task);
+        this.render();
+        this.processNext();
+        showToast('已加入影片轉筆記佇列', 'success');
+    },
+
     updateTask(id, progress) {
         const task = this.queue.find(t => t.id === id);
         if (task) {
@@ -252,6 +270,8 @@ const TaskQueue = {
                 await downloadVideoWorker(task);
             } else if (task.type === 'direct-download') {
                 await directDownloadWorker(task);
+            } else if (task.type === 'video-note') {
+                await processVideoNoteWorker(task);
             }
             task.status = 'done';
             task.progress = '處理完成';
@@ -502,7 +522,10 @@ async function directDownloadWorker(task) {
 
         if (data.success) {
             currentDirectVideoPath = data.path;
+            currentDirectVideoFilename = data.filename;
+            currentDirectVideoUrl = url;
             document.getElementById('btnPlayDirect').style.display = 'flex';
+            document.getElementById('videoActionContainer').style.display = 'block';
 
             const player = document.getElementById('directVideoPlayer');
             player.src = data.path;
@@ -520,6 +543,77 @@ function playDirectVideo() {
     const player = document.getElementById('directVideoPlayer');
     document.getElementById('directVideoContainer').style.display = 'block';
     player.play();
+}
+
+// ─── Video to Note ────────────────────────────────────
+function enqueueVideoToNote() {
+    if (!currentDirectVideoFilename) {
+        showToast('請先下載影片', 'error');
+        return;
+    }
+    TaskQueue.addVideoNoteTask();
+}
+
+async function processVideoNoteWorker(task) {
+    const { filename, url } = task.data;
+
+    // Transcribe
+    TaskQueue.updateTask(task.id, '語音轉逐字稿中...');
+    const trRes = await fetch(`${API}/api/whisper/transcribe`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ videoPath: filename })
+    });
+    const trData = await trRes.json();
+    
+    if (!trData.success || !trData.text) {
+        throw new Error('語音辨識失敗或無內容');
+    }
+    
+    const contentForNote = `來源連結：${url}\n\n影片逐字稿：\n${trData.text}`;
+    
+    // Generate Note
+    TaskQueue.updateTask(task.id, '生成中文筆記中...');
+    const noteRes = await fetch(`${API}/api/gemini/summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: contentForNote })
+    });
+    const noteData = await noteRes.json();
+
+    if (!noteData.success) throw new Error(noteData.error);
+    
+    // Save to HedgeDoc
+    TaskQueue.updateTask(task.id, '儲存至 HedgeDoc...');
+    const noteTitle = `影片逐字稿筆記 - ${new Date().toLocaleDateString('zh-TW')}`;
+
+    const saveRes = await fetch(`${API}/api/hedgedoc/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            content: noteData.text,
+            title: noteTitle,
+            sourceUrl: url
+        })
+    });
+    const saveData = await saveRes.json();
+
+    // Show result
+    showVideoNoteResult(noteData.text, saveData.success ? saveData.note : null);
+}
+
+function showVideoNoteResult(content, noteEntry) {
+    document.getElementById('videoNoteResult').style.display = 'block';
+    document.getElementById('videoNoteContent').innerHTML = renderMarkdown(content);
+
+    if (noteEntry && noteEntry.url) {
+        document.getElementById('videoNoteLink').href = noteEntry.url;
+        document.getElementById('videoNoteLink').style.display = 'inline-flex';
+        document.getElementById('videoNoteResultUrl').textContent = noteEntry.url;
+    } else {
+        document.getElementById('videoNoteLink').style.display = 'none';
+        document.getElementById('videoNoteResultUrl').textContent = 'HedgeDoc 儲存失敗，但筆記內容如下';
+    }
 }
 
 // ─── Show Note Result ─────────────────────────────────
