@@ -992,13 +992,16 @@ app.post('/api/podcast/generate-script', async (req, res) => {
     
     const isEnglish = language === 'en';
     const numMinutes = minutes || 5;
+    const targetWordCount = numMinutes * 200;
 
     const subPrompt = isEnglish
         ? `Please adapt the following content into a ${numMinutes}-minute two-host podcast script in English.
 Hosts are Bella (host_f, female, curious and lively) and Eric (host_m, male, grounded and professional).
-Make the conversation sound natural, engaging, and suitable for a ${numMinutes}-minute audio!`
-        : `請將以下貼文內容改寫為長率約 ${numMinutes} 分鐘的 Podcast 雙人對談腳本。
-主持人為曉曉 (host_f，女，活潑好奇) 與雲健 (host_m，男，沉穩專業)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。設計內容份量時請務必確保能錄製 ${numMinutes} 分鐘的語音長度！`;
+Make the conversation sound natural, engaging, and suitable for a ${numMinutes}-minute audio!
+IMPORTANT: A normal speaking rate is about 200 words per minute. To hit the ${numMinutes}-minute mark, your script MUST contain approximately ${targetWordCount} words in total across all dialogue. Please expand on the topics, add natural banter, examples, and deep dives to reach this length without sounding repetitive.`
+        : `請將以下貼文內容改寫為長度約 ${numMinutes} 分鐘的 Podcast 雙人對談腳本。
+主持人為曉曉 (host_f，女，活潑好奇) 與雲健 (host_m，男，沉穩專業)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。
+⚠️ 重要要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${numMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${targetWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與寒暄，來擴充內容長度，切忌空洞重複。`;
 
     const prompt = `${subPrompt}
 ⚠️ 嚴格輸出限制：你必須『只』輸出一個 Python List 格式，不要包含 Markdown 標記 (如 \`\`\`python )，不要前言結語。格式範例：
@@ -1077,17 +1080,11 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
 
     // Assign voices based on language
     let voiceF = 'zf_xiaoxiao';
-    let voiceM = 'zm_yunjian';
+    let voiceM = 'zm_yunxi';
 
     if (language === 'en') {
         voiceF = 'af_bella';
         voiceM = 'am_eric';
-    } else {
-        // Random Chinese voices
-        const fVoices = ['zf_xiaobei', 'zf_xiaoni', 'zf_xiaoxiao', 'zf_xiaoyi'];
-        const mVoices = ['zm_yunjian', 'zm_yunxi', 'zm_yunxia', 'zm_yunyang'];
-        voiceF = fVoices[Math.floor(Math.random() * fVoices.length)];
-        voiceM = mVoices[Math.floor(Math.random() * mVoices.length)];
     }
 
     // Replace generic host tags with specific Kokoro voice IDs
@@ -1113,7 +1110,8 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         filename: filename,
-        script: scriptData
+        script: scriptData,
+        speed: 0.9  // Slow down speech speed by 10%
       })
     });
 
