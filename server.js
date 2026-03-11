@@ -705,6 +705,41 @@ app.get('/api/videos/list', (req, res) => {
   }
 });
 
+app.post('/api/videos/rename', (req, res) => {
+  try {
+    const { oldFilename, newTitle } = req.body;
+    if (!oldFilename || !newTitle) {
+      return res.status(400).json({ error: 'Missing parameters' });
+    }
+    
+    // Create safe filename from the title
+    const safeTitle = newTitle.replace(/[/\\?%*:|"<>]/g, '-').trim();
+    if (!safeTitle) return res.status(400).json({ error: 'Invalid title' });
+
+    const ext = path.extname(oldFilename);
+    const newFilename = `${safeTitle}${ext}`;
+    
+    const oldPath = path.join(VIDEOS_DIR, oldFilename);
+    const newPath = path.join(VIDEOS_DIR, newFilename);
+    
+    if (fs.existsSync(oldPath)) {
+      if (oldPath !== newPath) {
+        fs.renameSync(oldPath, newPath);
+        // Also try to rename matching .wav if present
+        const oldBase = oldPath.replace(/\.[^/.]+$/, '');
+        const newBase = newPath.replace(/\.[^/.]+$/, '');
+        if (fs.existsSync(`${oldBase}.wav`)) fs.renameSync(`${oldBase}.wav`, `${newBase}.wav`);
+      }
+      res.json({ success: true, newFilename, newPath: `/api/videos/${newFilename}` });
+    } else {
+      res.status(404).json({ error: 'Video file not found' });
+    }
+  } catch (error) {
+    console.error('Rename error:', error.message);
+    res.status(500).json({ error: '重新命名影片失敗: ' + error.message });
+  }
+});
+
 // ─── Serve Audio ─────────────────────────────────────────────
 app.use('/api/audio', express.static(AUDIO_DIR));
 
@@ -814,12 +849,13 @@ app.post('/api/gemini/summarize', async (req, res) => {
 
 格式要求：
 1. **非常重要**：筆記的最開頭第一行必須加上標籤，格式為：###### tags: \`標籤1\` \`標籤2\`（請根據內容自動生成 2-3 個相關的標籤）
-2. 使用 Markdown 格式（如標題 #、粗體 **、列表 -）來讓閱讀更清晰
-3. 包含重點摘要
-4. 列出關鍵要點
-5. 如果有技術內容，請適當解釋
-6. 保持簡潔但完整
-7. 語言使用繁體中文
+2. **非常重要**：第二行必須是一個主要大標題（格式為：# 標題內容），請根據內容自動總結出一個最適合的標題。
+3. 使用 Markdown 格式（如標題 ##、粗體 **、列表 -）來讓閱讀更清晰
+4. 包含重點摘要
+5. 列出關鍵要點
+6. 如果有技術內容，請適當解釋
+7. 保持簡潔但完整
+8. 語言使用繁體中文
 
 以下是需要整理的原始內容：
 ---

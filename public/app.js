@@ -590,23 +590,57 @@ async function processVideoNoteWorker(task) {
 
     if (!noteData.success) throw new Error(noteData.error);
     
+    // Extract Title from Gemini response
+    const titleMatch = noteData.text.match(/^#\s+(.+)$/m);
+    let generatedTitle = `影片逐字稿筆記 - ${new Date().toLocaleDateString('zh-TW')}`;
+    if (titleMatch && titleMatch[1]) {
+        // Remove markdown artifacts like bolding if present inside the title
+        generatedTitle = titleMatch[1].replace(/\*\*/g, '').replace(/__/g, '').trim(); 
+    }
+    
+    // Append the source url and transcript to the note
+    const finalNoteContent = `${noteData.text}\n\n---\n\n### 原始來源與逐字稿\n\n- **來源連結：** ${url}\n\n**影片完整逐字稿：**\n\n${trData.text}`;
+
+    // Rename Video on the server
+    TaskQueue.updateTask(task.id, '重新命名影片檔案...');
+    try {
+        const renameRes = await fetch(`${API}/api/videos/rename`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ oldFilename: filename, newTitle: generatedTitle })
+        });
+        const renameData = await renameRes.json();
+        
+        if (renameData.success && renameData.newFilename) {
+            // Update currently playing video stats to match new names
+            if (currentDirectVideoFilename === filename) {
+                currentDirectVideoFilename = renameData.newFilename;
+                currentDirectVideoPath = renameData.newPath;
+                document.getElementById('directVideoPlayer').src = renameData.newPath;
+            }
+        }
+    } catch(e) {
+        console.error('Failed to rename video:', e);
+    }
+    
+    // Refresh the videos list
+    loadVideosList();
+
     // Save to HedgeDoc
     TaskQueue.updateTask(task.id, '儲存至 HedgeDoc...');
-    const noteTitle = `影片逐字稿筆記 - ${new Date().toLocaleDateString('zh-TW')}`;
-
     const saveRes = await fetch(`${API}/api/hedgedoc/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-            content: noteData.text,
-            title: noteTitle,
+            content: finalNoteContent,
+            title: generatedTitle,
             sourceUrl: url
         })
     });
     const saveData = await saveRes.json();
 
     // Show result
-    showVideoNoteResult(noteData.text, saveData.success ? saveData.note : null);
+    showVideoNoteResult(finalNoteContent, saveData.success ? saveData.note : null);
 }
 
 function showVideoNoteResult(content, noteEntry) {
