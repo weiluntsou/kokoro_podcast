@@ -254,8 +254,12 @@
                   <p>尚無可用筆記</p>
                 </div>
               </div>
-              <div class="flex gap-2">
-                <button class="btn btn-primary" id="btnGenPodcast" onclick="enqueuePodcast()" disabled>
+              <div class="flex gap-2" style="align-items: center;">
+                <select id="podcastLanguage" class="form-control" style="width:120px; flex-shrink:0;">
+                  <option value="zh">🇹🇼 中文</option>
+                  <option value="en">🇺🇸 英文</option>
+                </select>
+                <button class="btn btn-primary" id="btnGenPodcast" onclick="enqueuePodcast()" disabled style="flex-grow:1;">
                   🚀 加入 Podcast 生成序列
                 </button>
               </div>

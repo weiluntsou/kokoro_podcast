@@ -984,14 +984,23 @@ app.delete('/api/hedgedoc/notes/:id', (req, res) => {
 // ─── Podcast: Generate Script ────────────────────────────────
 app.post('/api/podcast/generate-script', async (req, res) => {
   try {
-    const { noteContents, noteTitle } = req.body;
+    const { noteContents, noteTitle, language, minutes } = req.body;
     if (!noteContents) return res.status(400).json({ error: '缺少筆記內容' });
 
     const settings = getSettings();
     if (!settings.geminiApiKey) return res.status(400).json({ error: '請先設定 Gemini API Key' });
+    
+    const isEnglish = language === 'en';
+    const numMinutes = minutes || 5;
 
-    const prompt = `請將以下貼文內容改寫為 Podcast 雙人對談腳本。
-主持人為曉曉 (host_f，女，活潑好奇) 與雲健 (host_m，男，沉穩專業)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。
+    const subPrompt = isEnglish
+        ? `Please adapt the following content into a ${numMinutes}-minute two-host podcast script in English.
+Hosts are Bella (host_f, female, curious and lively) and Eric (host_m, male, grounded and professional).
+Make the conversation sound natural, engaging, and suitable for a ${numMinutes}-minute audio!`
+        : `請將以下貼文內容改寫為長率約 ${numMinutes} 分鐘的 Podcast 雙人對談腳本。
+主持人為曉曉 (host_f，女，活潑好奇) 與雲健 (host_m，男，沉穩專業)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。設計內容份量時請務必確保能錄製 ${numMinutes} 分鐘的語音長度！`;
+
+    const prompt = `${subPrompt}
 ⚠️ 嚴格輸出限制：你必須『只』輸出一個 Python List 格式，不要包含 Markdown 標記 (如 \`\`\`python )，不要前言結語。格式範例：
 [
     ("host_f", "大家好..."),
@@ -999,6 +1008,7 @@ app.post('/api/podcast/generate-script', async (req, res) => {
 ]
 
 內容標題：${noteTitle || '未命名'}
+使用語言：${isEnglish ? 'English' : '繁體中文'}
 
 以下是需要改寫的內容：
 ${noteContents}`;
@@ -1034,7 +1044,7 @@ ${noteContents}`;
 // ─── Podcast: Generate Audio (Kokoro generate_podcast API) ───
 app.post('/api/podcast/generate-audio', async (req, res) => {
   try {
-    const { script, title } = req.body;
+    const { script, title, language } = req.body;
     if (!script) return res.status(400).json({ error: '缺少講稿' });
 
     const settings = getSettings();
@@ -1065,6 +1075,28 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
       throw new Error('無法解析講稿格式，請確認為 Python List 格式');
     }
 
+    // Assign voices based on language
+    let voiceF = 'zf_xiaoxiao';
+    let voiceM = 'zm_yunjian';
+
+    if (language === 'en') {
+        voiceF = 'af_bella';
+        voiceM = 'am_eric';
+    } else {
+        // Random Chinese voices
+        const fVoices = ['zf_xiaobei', 'zf_xiaoni', 'zf_xiaoxiao', 'zf_xiaoyi'];
+        const mVoices = ['zm_yunjian', 'zm_yunxi', 'zm_yunxia', 'zm_yunyang'];
+        voiceF = fVoices[Math.floor(Math.random() * fVoices.length)];
+        voiceM = mVoices[Math.floor(Math.random() * mVoices.length)];
+    }
+
+    // Replace generic host tags with specific Kokoro voice IDs
+    scriptData = scriptData.map(([speaker, text]) => {
+        if (speaker === 'host_f') return [voiceF, text];
+        if (speaker === 'host_m') return [voiceM, text];
+        return [speaker, text];
+    });
+
     // Ensure we don't include /v1 or /generate_podcast in the base URL for these custom endpoints
     let kokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '');
     kokoroBaseUrl = kokoroBaseUrl.replace(/\/generate_podcast\/?$/, '');
@@ -1072,7 +1104,7 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     // Generate filename strictly as English alphanumeric (Kokoro API requirement)
     const filename = `podcast_${Date.now()}`;
 
-    console.log(`Sending to Kokoro: url=${kokoroBaseUrl}/generate_podcast, filename=${filename}, segments=${scriptData.length}`);
+    console.log(`Sending to Kokoro: url=${kokoroBaseUrl}/generate_podcast, filename=${filename}, segments=${scriptData.length}, voices=${voiceF}/${voiceM}`);
 
     // Send to Kokoro generate_podcast API
 

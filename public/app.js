@@ -176,14 +176,14 @@ const TaskQueue = {
         showToast('已加入處理佇列', 'success');
     },
 
-    addPodcastTask(noteIdsArray, notesData, title) {
+    addPodcastTask(noteIdsArray, notesData, title, language = 'zh') {
         const task = {
             id: ++this.taskIdCounter,
             type: 'podcast',
             name: `Podcast: ${title.substring(0, 20)}...`,
             status: 'pending',
             progress: '排隊中...',
-            data: { noteIds: noteIdsArray, notesData, title }
+            data: { noteIds: noteIdsArray, notesData, title, language }
         };
         this.queue.push(task);
         this.render();
@@ -893,7 +893,8 @@ function enqueuePodcast() {
         title = titles.join(' & ');
     }
 
-    TaskQueue.addPodcastTask(noteIdsArray, null, title);
+    const language = document.getElementById('podcastLanguage').value;
+    TaskQueue.addPodcastTask(noteIdsArray, null, title, language);
 
     // Uncheck all selected notes
     selectedNoteIds.clear();
@@ -916,7 +917,7 @@ function showScriptPreview(script) {
     while ((match = tupleRegex.exec(script)) !== null) {
         const speaker = match[1];
         const text = match[2].replace(/\\"/g, '"').replace(/\\'/g, "'");
-        const displayName = speaker === 'host_f' ? '曉曉' : '雲健';
+        const displayName = speaker === 'host_f' ? '曉曉(F)' : '雲健(M)';
         const cssClass = speaker === 'host_f' ? 'speaker-a' : 'speaker-b';
         lines.push(`<div><span class="${cssClass}">${displayName}：</span>${escapeHtml(text)}</div>`);
     }
@@ -929,7 +930,7 @@ function showScriptPreview(script) {
 }
 
 async function processPodcastWorker(task) {
-    const { noteIds, title } = task.data;
+    const { noteIds, title, language } = task.data;
 
     TaskQueue.updateTask(task.id, '讀取 Hedgehog 筆記中...');
 
@@ -960,13 +961,18 @@ async function processPodcastWorker(task) {
         }
     }
 
-    TaskQueue.updateTask(task.id, '📍 正在用 Gemini 生成 Podcast 講稿...');
+    // Determine duration based on total text length
+    const minutes = combinedContent.length > 2000 ? 12 : 5;
+
+    TaskQueue.updateTask(task.id, `📍 正在用 Gemini 生成 ${minutes} 分鐘講稿...`);
     const scriptRes = await fetch(`${API}/api/podcast/generate-script`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             noteContents: combinedContent,
-            noteTitle: combinedTitle || title
+            noteTitle: combinedTitle || title,
+            language: language,
+            minutes: minutes
         })
     });
     const scriptData = await scriptRes.json();
@@ -985,7 +991,8 @@ async function processPodcastWorker(task) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
             script: script,
-            title: `🎙️ ${combinedTitle || title}`
+            title: `🎙️ ${combinedTitle || title}`,
+            language: language
         })
     });
 
