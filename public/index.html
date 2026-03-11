@@ -178,6 +178,24 @@
           </div>
         </div>
         
+        <!-- Video List -->
+        <div class="card">
+          <div class="card-header">
+            <div class="icon purple">🎞️</div>
+            <div>
+              <h3>已下載的影片</h3>
+              <p>點擊播放並轉為筆記</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadVideosList()" style="margin-left:auto">🔄 重新整理</button>
+          </div>
+          <div id="videosList">
+            <div class="empty-state" style="padding:20px">
+              <div class="icon">📭</div>
+              <p>尚未有任何已下載影片</p>
+            </div>
+          </div>
+        </div>
+        
         <!-- Video Note Result -->
         <div id="videoNoteResult" class="card" style="display:none">
           <div class="card-header">

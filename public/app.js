@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     loadSettings();
     loadNotesList();
     loadPodcastList();
+    loadVideosList();
 
     // Restore podcast playback progress
     const podcastAudio = document.getElementById('podcastAudio');
@@ -40,6 +41,9 @@ function switchPage(page) {
     if (page === 'podcast') {
         loadPodcastNoteSelect();
         loadPodcastList();
+    }
+    if (page === 'video') {
+        loadVideosList();
     }
 }
 
@@ -530,6 +534,9 @@ async function directDownloadWorker(task) {
             const player = document.getElementById('directVideoPlayer');
             player.src = data.path;
             document.getElementById('directVideoContainer').style.display = 'block';
+            
+            // Refresh video list
+            loadVideosList();
         } else {
             throw new Error(data.error);
         }
@@ -614,6 +621,58 @@ function showVideoNoteResult(content, noteEntry) {
         document.getElementById('videoNoteLink').style.display = 'none';
         document.getElementById('videoNoteResultUrl').textContent = 'HedgeDoc 儲存失敗，但筆記內容如下';
     }
+}
+
+// ─── Load Videos List ──────────────────────────────────
+async function loadVideosList() {
+    try {
+        const res = await fetch(`${API}/api/videos/list`);
+        const data = await res.json();
+        
+        const container = document.getElementById('videosList');
+        
+        if (!data.videos || data.videos.length === 0) {
+            container.innerHTML = `
+              <div class="empty-state" style="padding:20px">
+                <div class="icon">📭</div>
+                <p>尚未有任何已下載影片</p>
+              </div>
+            `;
+            return;
+        }
+
+        container.innerHTML = data.videos.map(v => `
+          <div class="note-item fade-in" style="cursor: pointer;" onclick="playListedVideo('${v.filename}', '${v.path}')">
+            <div class="note-icon" style="background:var(--accent-info)">🎬</div>
+            <div class="note-info">
+              <div class="note-title" style="word-break: break-all;">${escapeHtml(v.filename)}</div>
+              <div class="note-meta">${formatDate(v.createdAt)}</div>
+            </div>
+            <div class="note-actions">
+              <button class="btn btn-primary btn-sm">▶️ 播放 / 轉筆記</button>
+            </div>
+          </div>
+        `).join('');
+    } catch (e) {
+        console.error('Load videos error:', e);
+    }
+}
+
+function playListedVideo(filename, path) {
+    currentDirectVideoPath = path;
+    currentDirectVideoFilename = filename;
+    currentDirectVideoUrl = `已下載檔案: ${filename}`;
+    
+    document.getElementById('btnPlayDirect').style.display = 'flex';
+    document.getElementById('videoActionContainer').style.display = 'block';
+    
+    const player = document.getElementById('directVideoPlayer');
+    player.src = path;
+    document.getElementById('directVideoContainer').style.display = 'block';
+    player.play();
+    
+    // Scroll to player
+    player.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ─── Show Note Result ─────────────────────────────────

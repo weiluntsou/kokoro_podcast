@@ -683,6 +683,28 @@ app.post('/api/x/download-video', async (req, res) => {
 // ─── Serve Videos ────────────────────────────────────────────
 app.use('/api/videos', express.static(VIDEOS_DIR));
 
+app.get('/api/videos/list', (req, res) => {
+  try {
+    const files = fs.readdirSync(VIDEOS_DIR)
+      .filter(f => f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv'))
+      .map(f => {
+        const stats = fs.statSync(path.join(VIDEOS_DIR, f));
+        return {
+          filename: f,
+          path: `/api/videos/${f}`,
+          createdAt: stats.birthtime, // Use creation or modification time
+          size: stats.size
+        };
+      })
+      .sort((a, b) => b.createdAt - a.createdAt);
+    
+    res.json({ success: true, videos: files });
+  } catch (error) {
+    console.error('List videos error:', error.message);
+    res.status(500).json({ error: '無法讀取影片清單' });
+  }
+});
+
 // ─── Serve Audio ─────────────────────────────────────────────
 app.use('/api/audio', express.static(AUDIO_DIR));
 
@@ -709,43 +731,60 @@ app.post('/api/whisper/transcribe', async (req, res) => {
 
     const audioFile = fs.existsSync(audioPath) ? audioPath : fullPath;
 
-    // Send to Whisper API
-    const formData = new FormData();
-    formData.append('file', fs.createReadStream(audioFile));
-    formData.append('response_format', 'json');
+    const whisperBase = (settings.whisperUrl || 'http://localhost:8080').replace(/\/$/, '');
 
-    const whisperRes = await fetch(`${settings.whisperUrl}/v1/audio/transcriptions`, {
-      method: 'POST',
-      body: formData,
-      headers: formData.getHeaders()
-    });
+    // Try multiple common endpoints for Whisper API wrappers
+    const endpoints = [
+      '/v1/audio/transcriptions', // OpenAI standard
+      '/inference',               // whisper.cpp server
+      '/transcribe',              // common flask wrappers
+      '/asr',                     // whisper-asr-webservice
+      '/api/transcribe',
+      '/'                         // some root endpoints
+    ];
 
-    if (!whisperRes.ok) {
-      // Record first error
-      const errText1 = await whisperRes.text().catch(() => '');
-      
-      // Try alternative endpoint
-      const formData2 = new FormData();
-      formData2.append('file', fs.createReadStream(audioFile));
-      formData2.append('response_format', 'json'); // Sometimes needed for inference too
+    let lastData = null;
+    let errorLog = [];
+    let success = false;
 
-      const whisperRes2 = await fetch(`${settings.whisperUrl}/inference`, {
-        method: 'POST',
-        body: formData2,
-        headers: formData2.getHeaders()
-      });
+    for (const endpoint of endpoints) {
+      const fullEndpointUrl = `${whisperBase}${endpoint}`;
+      const form = new FormData();
+      // append the file stream and explicitly supply the filename string to ensure flask reads it as a file upload correctly
+      form.append('file', fs.createReadStream(audioFile), { filename: path.basename(audioFile) });
+      form.append('response_format', 'json');
 
-      if (!whisperRes2.ok) {
-        const errText2 = await whisperRes2.text().catch(() => '');
-        throw new Error(`Whisper API 錯誤: ${whisperRes2.status} (嘗試了 /v1/audio/transcriptions: [${whisperRes.status}] ${errText1.substring(0, 50)} 及 /inference: [${whisperRes2.status}] ${errText2.substring(0, 50)})`);
+      try {
+        const res = await fetch(fullEndpointUrl, {
+          method: 'POST',
+          body: form,
+          headers: form.getHeaders(),
+          timeout: 120000 // Give whisper some time to process
+        });
+
+        if (res.ok) {
+          lastData = await res.json();
+          success = true;
+          break; // Found working endpoint
+        } else {
+          const errText = await res.text().catch(() => '');
+          errorLog.push(`[${fullEndpointUrl} 回傳 ${res.status}] ${errText.substring(0, 50)}`);
+        }
+      } catch (e) {
+        errorLog.push(`[${fullEndpointUrl} 錯誤] ${e.message}`);
       }
-      
-      const data = await whisperRes2.json();
-      return res.json({ success: true, text: data.text || data.transcription || '' });
     }
 
-    const data = await whisperRes.json();
-    res.json({ success: true, text: data.text || data.transcription || '' });
+    if (!success) {
+      throw new Error(`連線失敗或找不到正確的路徑。日誌: ${errorLog.join(' | ')}`);
+    }
+
+    const text = lastData.text || lastData.transcription || lastData.result || '';
+    if (!text && lastData) {
+      console.log('Warn: whisper parsed blank, lastData keys:', Object.keys(lastData));
+    }
+    
+    res.json({ success: true, text: text });
   } catch (error) {
     console.error('Whisper error:', error.message);
     res.status(500).json({ error: `轉錄失敗: ${error.message}` });
