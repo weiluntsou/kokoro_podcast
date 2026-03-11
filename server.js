@@ -1082,14 +1082,9 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     let voiceF = 'zf_xiaoxiao';
     let voiceM = 'zm_yunjian'; // 改回你習慣的雲健
 
-    // 加入「中文防呆偵測」：只要劇本裡有中文字，就無條件強制使用中文語音！
-    const containsChinese = /[\u4e00-\u9fa5]/.test(script);
-    
-    if (language === 'en' && !containsChinese) {
+    if (language === 'en') {
       voiceF = 'af_bella';
       voiceM = 'am_eric';
-    } else if (language === 'en' && containsChinese) {
-      console.log("⚠️ 警告：前端傳送了英文語系，但偵測到中文內容，已強制切換回中文語音保護機制。");
     }
 
     // Replace generic host tags with specific Kokoro voice IDs and strictly chunk long texts
