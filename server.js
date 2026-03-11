@@ -644,10 +644,12 @@ app.post('/api/x/download-video', async (req, res) => {
     const match = url.match(/status\/(\d+)/);
     const videoId = match ? match[1] : Date.now().toString();
     const outputPath = path.join(VIDEOS_DIR, `${videoId}.mp4`);
+    const metaPath = path.join(VIDEOS_DIR, `${videoId}.meta.json`);
     const settings = getSettings();
 
     // Check if already downloaded
     if (fs.existsSync(outputPath)) {
+      if (!fs.existsSync(metaPath)) { fs.writeFileSync(metaPath, JSON.stringify({ url }), 'utf8'); }
       return res.json({ success: true, filename: `${videoId}.mp4`, path: `/api/videos/${videoId}.mp4` });
     }
 
@@ -664,12 +666,16 @@ app.post('/api/x/download-video', async (req, res) => {
     execSync(cmd, { encoding: 'utf-8', timeout: 120000 });
 
     if (fs.existsSync(outputPath)) {
+      fs.writeFileSync(metaPath, JSON.stringify({ url }), 'utf8');
       res.json({ success: true, filename: `${videoId}.mp4`, path: `/api/videos/${videoId}.mp4` });
     } else {
       // Check for other extensions
-      const files = fs.readdirSync(VIDEOS_DIR).filter(f => f.startsWith(videoId));
+      const files = fs.readdirSync(VIDEOS_DIR).filter(f => f.startsWith(videoId) && !f.endsWith('.meta.json'));
       if (files.length > 0) {
-        res.json({ success: true, filename: files[0], path: `/api/videos/${files[0]}` });
+        const returnedFile = files[0];
+        const baseName = returnedFile.replace(/\.[^/.]+$/, '');
+        fs.writeFileSync(path.join(VIDEOS_DIR, `${baseName}.meta.json`), JSON.stringify({ url }), 'utf8');
+        res.json({ success: true, filename: returnedFile, path: `/api/videos/${returnedFile}` });
       } else {
         throw new Error('影片下載失敗');
       }
@@ -689,11 +695,21 @@ app.get('/api/videos/list', (req, res) => {
       .filter(f => f.endsWith('.mp4') || f.endsWith('.webm') || f.endsWith('.mkv'))
       .map(f => {
         const stats = fs.statSync(path.join(VIDEOS_DIR, f));
+        const baseName = f.replace(/\.[^/.]+$/, '');
+        const metaPath = path.join(VIDEOS_DIR, `${baseName}.meta.json`);
+        let originalUrl = '';
+        if (fs.existsSync(metaPath)) {
+            try {
+                const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+                originalUrl = meta.url || '';
+            } catch (e) {}
+        }
         return {
           filename: f,
           path: `/api/videos/${f}`,
           createdAt: stats.birthtime, // Use creation or modification time
-          size: stats.size
+          size: stats.size,
+          url: originalUrl
         };
       })
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -729,6 +745,7 @@ app.post('/api/videos/rename', (req, res) => {
         const oldBase = oldPath.replace(/\.[^/.]+$/, '');
         const newBase = newPath.replace(/\.[^/.]+$/, '');
         if (fs.existsSync(`${oldBase}.wav`)) fs.renameSync(`${oldBase}.wav`, `${newBase}.wav`);
+        if (fs.existsSync(`${oldBase}.meta.json`)) fs.renameSync(`${oldBase}.meta.json`, `${newBase}.meta.json`);
       }
       res.json({ success: true, newFilename, newPath: `/api/videos/${newFilename}` });
     } else {

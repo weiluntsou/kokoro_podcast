@@ -676,7 +676,7 @@ async function loadVideosList() {
         }
 
         container.innerHTML = data.videos.map(v => `
-          <div class="note-item fade-in" style="cursor: pointer;" onclick="playListedVideo('${v.filename}', '${v.path}')">
+          <div class="note-item fade-in" style="cursor: pointer;" onclick="playListedVideo('${v.filename}', '${v.path}', '${v.url || ''}')">
             <div class="note-icon" style="background:var(--accent-info)">🎬</div>
             <div class="note-info">
               <div class="note-title" style="word-break: break-all;">${escapeHtml(v.filename)}</div>
@@ -692,10 +692,10 @@ async function loadVideosList() {
     }
 }
 
-function playListedVideo(filename, path) {
+function playListedVideo(filename, path, url) {
     currentDirectVideoPath = path;
     currentDirectVideoFilename = filename;
-    currentDirectVideoUrl = `已下載檔案: ${filename}`;
+    currentDirectVideoUrl = url || `已下載檔案: ${filename}`;
     
     document.getElementById('btnPlayDirect').style.display = 'flex';
     document.getElementById('videoActionContainer').style.display = 'block';
