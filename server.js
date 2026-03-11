@@ -1127,7 +1127,7 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
         filename: filename,
         script: processedScript,
         speed: 0.9,  // Slow down speech speed by 10%
-        language: language === 'en' ? 'en-us' : 'zh' // Force Kokoro to use the correct phonemizer mapping
+        language: language === 'en' ? 'a' : 'z' // Kokoro uses single-character language codes: 'a' for American English, 'z' for Mandarin
       })
     });
 
