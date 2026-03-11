@@ -26,6 +26,16 @@ document.addEventListener('DOMContentLoaded', () => {
     podcastAudio.addEventListener('timeupdate', onPodcastTimeUpdate);
     podcastAudio.addEventListener('ended', onPodcastEnded);
     podcastAudio.addEventListener('loadedmetadata', onPodcastLoaded);
+
+    // Driving mode lock screen events
+    const lockScreen = document.getElementById('drivingLockScreen');
+    if (lockScreen) {
+        lockScreen.addEventListener('mousedown', handleLockScreenTouchStart);
+        lockScreen.addEventListener('mouseup', handleLockScreenTouchEnd);
+        lockScreen.addEventListener('mouseleave', handleLockScreenTouchEnd);
+        lockScreen.addEventListener('touchstart', handleLockScreenTouchStart, {passive: true});
+        lockScreen.addEventListener('touchend', handleLockScreenTouchEnd);
+    }
 });
 
 // ─── Navigation ───────────────────────────────────────
@@ -1080,6 +1090,9 @@ function playPodcast(podcast) {
     playerCard.style.display = 'block';
     document.getElementById('currentPodcastTitle').textContent = podcast.title;
     document.getElementById('podcastAudioTitle').textContent = podcast.title;
+    
+    // Updated for Driving mode
+    document.getElementById('drivingPodcastTitle').textContent = podcast.title;
 
     audio.src = podcast.audioPath;
 
@@ -1090,18 +1103,27 @@ function playPodcast(podcast) {
 
     audio.play().catch(() => { });
     document.getElementById('podcastPlayBtn').textContent = '⏸';
+    document.getElementById('drivingPlayBtn').textContent = '⏸';
+    document.getElementById('drivingLockPlayBtn').textContent = '⏸';
 }
 
-function togglePodcastPlay() {
+function togglePodcastPlay(e) {
+    if (e) e.stopPropagation(); // prevent UI lock click event on mobile
     const audio = document.getElementById('podcastAudio');
     const btn = document.getElementById('podcastPlayBtn');
+    const drivingBtn = document.getElementById('drivingPlayBtn');
+    const drivingLockBtn = document.getElementById('drivingLockPlayBtn');
 
     if (audio.paused) {
         audio.play();
         btn.textContent = '⏸';
+        drivingBtn.textContent = '⏸';
+        drivingLockBtn.textContent = '⏸';
     } else {
         audio.pause();
         btn.textContent = '▶';
+        drivingBtn.textContent = '▶';
+        drivingLockBtn.textContent = '▶';
     }
 }
 
@@ -1111,8 +1133,12 @@ function onPodcastTimeUpdate() {
 
     const pct = (audio.currentTime / audio.duration) * 100;
     document.getElementById('podcastProgressBar').style.width = `${pct}%`;
-    document.getElementById('podcastCurrentTime').textContent = formatTime(audio.currentTime);
-    document.getElementById('podcastDuration').textContent = formatTime(audio.duration);
+    
+    const curTimeStr = formatTime(audio.currentTime);
+    const durStr = formatTime(audio.duration);
+    document.getElementById('podcastCurrentTime').textContent = curTimeStr;
+    document.getElementById('podcastDuration').textContent = durStr;
+    document.getElementById('drivingPodcastTime').textContent = `${curTimeStr} / ${durStr}`;
 
     // Save progress every 5 seconds
     if (currentPodcastId && Math.floor(audio.currentTime) % 5 === 0) {
@@ -1127,8 +1153,19 @@ function onPodcastLoaded() {
 
 function onPodcastEnded() {
     document.getElementById('podcastPlayBtn').textContent = '▶';
+    document.getElementById('drivingPlayBtn').textContent = '▶';
+    document.getElementById('drivingLockPlayBtn').textContent = '▶';
     if (currentPodcastId) {
         savePodcastProgress(currentPodcastId, 0, document.getElementById('podcastAudio').duration);
+        
+        // Auto play next podcast sequentially
+        if (window.loadedPodcasts && window.loadedPodcasts.length > 0) {
+            const currentIndex = window.loadedPodcasts.findIndex(p => p.id === currentPodcastId);
+            if (currentIndex !== -1 && currentIndex < window.loadedPodcasts.length - 1) {
+                // There is a next podcast, play it directly
+                playPodcast(window.loadedPodcasts[currentIndex + 1]);
+            }
+        }
     }
 }
 
@@ -1242,3 +1279,68 @@ function formatTime(seconds) {
     const s = Math.floor(seconds % 60);
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
+
+// ─── Driving Mode & Sequential Play Logic ──────────────
+function playNextPodcast() {
+    if (!window.loadedPodcasts || !currentPodcastId) return;
+    const currentIndex = window.loadedPodcasts.findIndex(p => p.id === currentPodcastId);
+    if (currentIndex !== -1 && currentIndex < window.loadedPodcasts.length - 1) {
+        playPodcast(window.loadedPodcasts[currentIndex + 1]);
+    } else {
+        showToast('已經是最後一首', 'info');
+    }
+}
+
+function playPrevPodcast() {
+    if (!window.loadedPodcasts || !currentPodcastId) return;
+    const currentIndex = window.loadedPodcasts.findIndex(p => p.id === currentPodcastId);
+    if (currentIndex > 0) {
+        playPodcast(window.loadedPodcasts[currentIndex - 1]);
+    } else {
+        showToast('已經是第一首', 'info');
+    }
+}
+
+let isDrivingLocked = false;
+let unlockTimer = null;
+
+function enterDrivingMode() {
+    if (!currentPodcastId) {
+        showToast('請先播放一個 Podcast', 'info');
+        return;
+    }
+    document.getElementById('drivingModeOverlay').style.display = 'flex';
+}
+
+function exitDrivingMode() {
+    document.getElementById('drivingModeOverlay').style.display = 'none';
+    isDrivingLocked = false;
+    document.getElementById('drivingLockScreen').style.display = 'none';
+}
+
+function toggleDrivingLock() {
+    isDrivingLocked = true;
+    document.getElementById('drivingLockScreen').style.display = 'flex';
+}
+
+function unlockDrivingMode() {
+    isDrivingLocked = false;
+    document.getElementById('drivingLockScreen').style.display = 'none';
+    showToast('鎖定已解除', 'success');
+}
+
+function handleLockScreenTouchStart(e) {
+    // Exclude click on lock-play button
+    if (e.target.id === 'drivingLockPlayBtn') return;
+    unlockTimer = setTimeout(() => {
+        unlockDrivingMode();
+    }, 1000); // 1 second long press to unlock
+}
+
+function handleLockScreenTouchEnd(e) {
+    if (unlockTimer) {
+        clearTimeout(unlockTimer);
+        unlockTimer = null;
+    }
+}
+

@@ -1078,9 +1078,9 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
       throw new Error('無法解析純文字講稿標籤格式，請確認是否為帶有 [host_f] [host_m] 正確標註的內文');
     }
 
-    // Assign voices based on language
+    // 根據前端傳來的 language 參數決定語音模型 (不再自動偵測中文)
     let voiceF = 'zf_xiaoxiao';
-    let voiceM = 'zm_yunjian'; // 改回你習慣的雲健
+    let voiceM = 'zm_yunjian';
 
     if (language === 'en') {
       voiceF = 'af_bella';

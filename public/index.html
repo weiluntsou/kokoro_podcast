@@ -288,6 +288,7 @@
                   <h3>正在播放</h3>
                   <p id="currentPodcastTitle">-</p>
                 </div>
+                <button class="btn btn-secondary btn-sm" onclick="enterDrivingMode()" style="margin-left:auto;">🚗 駕駛模式</button>
               </div>
               <div class="audio-player">
                 <div class="audio-player-top">
@@ -427,6 +428,49 @@
       <div class="spinner spinner-lg"></div>
       <p id="loadingText">處理中...</p>
     </div>
+  </div>
+
+  <!-- Driving Mode Overlay -->
+  <div id="drivingModeOverlay" class="driving-mode-overlay" style="display:none;">
+    <div class="driving-mode-container" id="drivingModeContainer">
+      <!-- Header -->
+      <div class="driving-header">
+        <button class="btn-icon" onclick="exitDrivingMode()" style="color:white; font-size:24px; background:transparent; border:none; cursor:pointer;">🡇</button>
+        <span style="font-size:18px; font-weight:600;">駕駛模式</span>
+        <div style="width:40px"></div>
+      </div>
+
+      <!-- Content -->
+      <div class="driving-content">
+        <div class="driving-cover">🎧</div>
+        <h2 id="drivingPodcastTitle">podcast title</h2>
+        <p id="drivingPodcastTime">00:00 / 00:00</p>
+      </div>
+
+      <!--Controls-->
+      <div class="driving-controls">
+        <button class="driving-ctrl-btn" onclick="playPrevPodcast()">⏮</button>
+        <button id="drivingPlayBtn" class="driving-play-btn" onclick="togglePodcastPlay()">⏸</button>
+        <button class="driving-ctrl-btn" onclick="playNextPodcast()">⏭</button>
+      </div>
+    </div>
+    
+    <!-- Lock Screen layer -->
+    <div id="drivingLockScreen" class="driving-lock-screen" style="display:none;">
+      <div class="lock-icon">🔒</div>
+      <p style="font-size:18px; font-weight:bold; margin-bottom:8px;">畫面已鎖定</p>
+      <p style="font-size:14px; opacity:0.7;">長按解鎖</p>
+      
+      <!-- Allow Play/Pause even when locked for convenience -->
+      <div style="margin-top:40px;">
+        <button id="drivingLockPlayBtn" class="driving-play-btn" style="width:80px; height:80px; font-size:32px;" onclick="togglePodcastPlay(event)">⏸</button>
+      </div>
+    </div>
+
+    <!-- Floating Lock Btn -->
+    <button id="btnToggleLock" class="driving-toggle-lock" onclick="toggleDrivingLock()">
+      🔓 鎖定畫面
+    </button>
   </div>
 
   <script src="app.js"></script>
