@@ -1080,11 +1080,16 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
 
     // Assign voices based on language
     let voiceF = 'zf_xiaoxiao';
-    let voiceM = 'zm_yunxi';
+    let voiceM = 'zm_yunjian'; // 改回你習慣的雲健
 
-    if (language === 'en') {
+    // 加入「中文防呆偵測」：只要劇本裡有中文字，就無條件強制使用中文語音！
+    const containsChinese = /[\u4e00-\u9fa5]/.test(script);
+    
+    if (language === 'en' && !containsChinese) {
       voiceF = 'af_bella';
       voiceM = 'am_eric';
+    } else if (language === 'en' && containsChinese) {
+      console.log("⚠️ 警告：前端傳送了英文語系，但偵測到中文內容，已強制切換回中文語音保護機制。");
     }
 
     // Replace generic host tags with specific Kokoro voice IDs and strictly chunk long texts
@@ -1294,7 +1299,8 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
                   continue;
                 }
                 const buffer = await audioRes.buffer();
-                const ext = audioUrl.match(/\.(\w+)(?:[\?#]|$)/)?.[1] || 'wav';
+                // 不要依賴下載網址來判斷副檔名，直接從 Python 回傳的 file_path 抓取，或者預設為 mp3
+                const ext = statusData.file_path ? statusData.file_path.split('.').pop() : 'mp3';
                 const tempFile = path.join(AUDIO_DIR, `temp_${podcast.id}_${i}.${ext}`);
                 fs.writeFileSync(tempFile, buffer);
                 downloadedFiles.push(tempFile);
