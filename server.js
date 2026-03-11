@@ -50,6 +50,22 @@ function getSettings() {
 }
 
 // ─── Settings API ────────────────────────────────────────────
+function convertCookieToNetscape(cookieString, domain = '.x.com') {
+  if (!cookieString) return '';
+  const lines = ['# Netscape HTTP Cookie File', ''];
+  const cookies = cookieString.split(';');
+  const expireTime = Math.floor(Date.now() / 1000) + 365 * 24 * 60 * 60; // 1 year from now
+  for (const cookie of cookies) {
+    const parts = cookie.trim().split('=');
+    if (parts.length >= 2) {
+      const name = parts[0];
+      const value = parts.slice(1).join('=');
+      lines.push(`${domain}\tTRUE\t/\tTRUE\t${expireTime}\t${name}\t${value}`);
+    }
+  }
+  return lines.join('\n');
+}
+
 app.get('/api/settings', (req, res) => {
   res.json(getSettings());
 });
@@ -89,7 +105,7 @@ app.post('/api/x/parse', async (req, res) => {
       let cookieArgs = '';
       if (settings.xCookie) {
         const cookieFile = path.join(DATA_DIR, 'x_cookies.txt');
-        fs.writeFileSync(cookieFile, settings.xCookie, 'utf-8');
+        fs.writeFileSync(cookieFile, convertCookieToNetscape(settings.xCookie), 'utf-8');
         cookieArgs = `--cookies "${cookieFile}"`;
       }
 
@@ -639,7 +655,7 @@ app.post('/api/x/download-video', async (req, res) => {
     if (settings.xCookie) {
       // Write temp cookie file
       const cookieFile = path.join(DATA_DIR, 'x_cookies.txt');
-      fs.writeFileSync(cookieFile, settings.xCookie, 'utf-8');
+      fs.writeFileSync(cookieFile, convertCookieToNetscape(settings.xCookie), 'utf-8');
       cookieArgs = `--cookies "${cookieFile}"`;
     }
 
