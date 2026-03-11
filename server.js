@@ -699,10 +699,10 @@ app.get('/api/videos/list', (req, res) => {
         const metaPath = path.join(VIDEOS_DIR, `${baseName}.meta.json`);
         let originalUrl = '';
         if (fs.existsSync(metaPath)) {
-            try {
-                const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
-                originalUrl = meta.url || '';
-            } catch (e) {}
+          try {
+            const meta = JSON.parse(fs.readFileSync(metaPath, 'utf8'));
+            originalUrl = meta.url || '';
+          } catch (e) { }
         }
         return {
           filename: f,
@@ -713,7 +713,7 @@ app.get('/api/videos/list', (req, res) => {
         };
       })
       .sort((a, b) => b.createdAt - a.createdAt);
-    
+
     res.json({ success: true, videos: files });
   } catch (error) {
     console.error('List videos error:', error.message);
@@ -727,17 +727,17 @@ app.post('/api/videos/rename', (req, res) => {
     if (!oldFilename || !newTitle) {
       return res.status(400).json({ error: 'Missing parameters' });
     }
-    
+
     // Create safe filename from the title
     const safeTitle = newTitle.replace(/[/\\?%*:|"<>]/g, '-').trim();
     if (!safeTitle) return res.status(400).json({ error: 'Invalid title' });
 
     const ext = path.extname(oldFilename);
     const newFilename = `${safeTitle}${ext}`;
-    
+
     const oldPath = path.join(VIDEOS_DIR, oldFilename);
     const newPath = path.join(VIDEOS_DIR, newFilename);
-    
+
     if (fs.existsSync(oldPath)) {
       if (oldPath !== newPath) {
         fs.renameSync(oldPath, newPath);
@@ -835,7 +835,7 @@ app.post('/api/whisper/transcribe', async (req, res) => {
     if (!text && lastData) {
       console.log('Warn: whisper parsed blank, lastData keys:', Object.keys(lastData));
     }
-    
+
     res.json({ success: true, text: text });
   } catch (error) {
     console.error('Whisper error:', error.message);
@@ -989,28 +989,32 @@ app.post('/api/podcast/generate-script', async (req, res) => {
 
     const settings = getSettings();
     if (!settings.geminiApiKey) return res.status(400).json({ error: '請先設定 Gemini API Key' });
-    
+
     const isEnglish = language === 'en';
     const numMinutes = minutes || 5;
     const targetWordCount = numMinutes * 200;
 
     const subPrompt = isEnglish
-        ? `Please adapt the following content into a ${numMinutes}-minute two-host podcast script in English.
+      ? `Please adapt the following content into a ${numMinutes}-minute two-host podcast script in English.
 Hosts are Bella (host_f, female, curious and lively) and Eric (host_m, male, grounded and professional).
 Make the conversation sound natural, engaging, and suitable for a ${numMinutes}-minute audio!
 IMPORTANT: A normal speaking rate is about 200 words per minute. To hit the ${numMinutes}-minute mark, your script MUST contain approximately ${targetWordCount} words in total across all dialogue. Please expand on the topics, add natural banter, examples, and deep dives to reach this length without sounding repetitive.`
-        : `請將以下貼文內容改寫為長度約 ${numMinutes} 分鐘的 Podcast 雙人對談腳本。
+      : `請將以下貼文內容改寫為長度約 ${numMinutes} 分鐘的 Podcast 雙人對談腳本。
 主持人為曉曉 (host_f，女，活潑好奇) 與雲健 (host_m，男，沉穩專業)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。
 ⚠️ 重要要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${numMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${targetWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與寒暄，來擴充內容長度，切忌空洞重複。`;
 
     const prompt = `${subPrompt}
 ⚠️ 嚴格輸出限制：你必須『只』使用純文字格式，絕對不要包含任何 JSON、陣列或寫程式碼的結構 (如 \`\`\`json )，也不要前言結語！
 請使用以下固定格式，在每一句話的最前面加上發言人的標註：
-[host_f]
+${isEnglish ? `[host_f]
+Hello everyone...
+
+[host_m]
+Yes, exactly...` : `[host_f]
 大家好...
 
 [host_m]
-沒錯...
+沒錯...`}
 
 內容標題：${noteTitle || '未命名'}
 使用語言：${isEnglish ? 'English' : '繁體中文'}
@@ -1058,16 +1062,16 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     // Parse the script into a JS array from plain text format
     let scriptData = [];
     try {
-        const blocks = script.split(/\[(host_[fm])\]/i);
-        for (let i = 1; i < blocks.length; i += 2) {
-            const speaker = blocks[i].toLowerCase();
-            const text = blocks[i+1].trim();
-            if (text) {
-                scriptData.push([speaker, text]);
-            }
+      const blocks = script.split(/\[(host_[fm])\]/i);
+      for (let i = 1; i < blocks.length; i += 2) {
+        const speaker = blocks[i].toLowerCase();
+        const text = blocks[i + 1].trim();
+        if (text) {
+          scriptData.push([speaker, text]);
         }
+      }
     } catch (parseErr) {
-        console.error('Text block parse error:', parseErr.message);
+      console.error('Text block parse error:', parseErr.message);
     }
 
     if (!scriptData || scriptData.length === 0) {
@@ -1079,30 +1083,30 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     let voiceM = 'zm_yunxi';
 
     if (language === 'en') {
-        voiceF = 'af_bella';
-        voiceM = 'am_eric';
+      voiceF = 'af_bella';
+      voiceM = 'am_eric';
     }
 
     // Replace generic host tags with specific Kokoro voice IDs and strictly chunk long texts
     let processedScript = [];
     scriptData.forEach(([speaker, text]) => {
-        let finalSpeaker = speaker;
-        if (speaker === 'host_f') finalSpeaker = voiceF;
-        else if (speaker === 'host_m') finalSpeaker = voiceM;
+      let finalSpeaker = speaker;
+      if (speaker === 'host_f') finalSpeaker = voiceF;
+      else if (speaker === 'host_m') finalSpeaker = voiceM;
 
-        // Split text by common punctuation to avoid PyTorch tensor size limits (usually >250-300 chars crashes Kokoro)
-        const sentences = text.split(/(?<=[。！？；.!?;\n])\s*/).filter(s => s.trim().length > 0);
-        
-        let currentChunk = '';
-        sentences.forEach(sentence => {
-            if (currentChunk.length + sentence.length > 200) {
-                if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
-                currentChunk = sentence;
-            } else {
-                currentChunk += (currentChunk ? ' ' : '') + sentence;
-            }
-        });
-        if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
+      // Split text by common punctuation to avoid PyTorch tensor size limits (usually >250-300 chars crashes Kokoro)
+      const sentences = text.split(/(?<=[。！？；.!?;\n])\s*/).filter(s => s.trim().length > 0);
+
+      let currentChunk = '';
+      sentences.forEach(sentence => {
+        if (currentChunk.length + sentence.length > 200) {
+          if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
+          currentChunk = sentence;
+        } else {
+          currentChunk += (currentChunk ? ' ' : '') + sentence;
+        }
+      });
+      if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
     });
 
     // Ensure we don't include /v1 or /generate_podcast in the base URL for these custom endpoints
@@ -1122,7 +1126,8 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
       body: JSON.stringify({
         filename: filename,
         script: processedScript,
-        speed: 0.9  // Slow down speech speed by 10%
+        speed: 0.9,  // Slow down speech speed by 10%
+        language: language === 'en' ? 'en-us' : 'zh' // Force Kokoro to use the correct phonemizer mapping
       })
     });
 
@@ -1218,31 +1223,31 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
           urlsToDownload = [];
           const fn = statusData.filename;
           const possiblePaths = [
-              `/download/${taskId}`,
-              `/audio/${fn}.wav`,
-              `/outputs/${fn}.wav`,
-              `/v1/audio/generations/${fn}.wav`,
-              `/${fn}.wav`
+            `/download/${taskId}`,
+            `/audio/${fn}.wav`,
+            `/outputs/${fn}.wav`,
+            `/v1/audio/generations/${fn}.wav`,
+            `/${fn}.wav`
           ];
-          
+
           const cleanBaseUrl = kokoroBaseUrl.replace(/\/+$/, '');
           for (const p of possiblePaths) {
-              const testUrl = `${cleanBaseUrl}${p}`;
-              try {
-                  const headRes = await fetch(testUrl);
-                  if (headRes.ok) {
-                      const cType = headRes.headers.get('content-type') || '';
-                      if (cType.includes('audio') || cType.includes('video') || cType === 'application/octet-stream') {
-                          urlsToDownload = [testUrl];
-                          console.log(`Found valid audio file endpoint at: ${testUrl}`);
-                          break;
-                      }
-                  }
-              } catch (e) { /* ignore */ }
+            const testUrl = `${cleanBaseUrl}${p}`;
+            try {
+              const headRes = await fetch(testUrl);
+              if (headRes.ok) {
+                const cType = headRes.headers.get('content-type') || '';
+                if (cType.includes('audio') || cType.includes('video') || cType === 'application/octet-stream') {
+                  urlsToDownload = [testUrl];
+                  console.log(`Found valid audio file endpoint at: ${testUrl}`);
+                  break;
+                }
+              }
+            } catch (e) { /* ignore */ }
           }
-          
+
           if (urlsToDownload.length === 0) {
-              console.error('Could not find a valid audio download URL for the Kokoro task.');
+            console.error('Could not find a valid audio download URL for the Kokoro task.');
           }
         }
 
@@ -1253,30 +1258,30 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
 
           for (let i = 0; i < urlsToDownload.length; i++) {
             let url = urlsToDownload[i];
-            
+
             // If url is literally just the path like /download/xxx, prepend kokoroBaseUrl correctly
             // The user's settings.kokoroUrl might be http://localhost:8880, but the API may return a string like `http://localhost:8000/download/xxx` if Kokoro's internal host config differs.
             // We must force the download to use the host/port defined in the user settings!
-            
+
             const userKokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '').replace(/\/generate_podcast\/?$/, '');
             let audioUrl = url;
 
             if (url.startsWith('http')) {
-                // Force the host:port from user settings if the internal Kokoro URL returned differs
-                try {
-                    const urlObj = new URL(url);
-                    const baseObj = new URL(userKokoroBaseUrl);
-                    urlObj.protocol = baseObj.protocol;
-                    urlObj.host = baseObj.host;
-                    urlObj.port = baseObj.port;
-                    audioUrl = urlObj.toString();
-                } catch (e) {
-                    // Fallback
-                    audioUrl = url;
-                }
+              // Force the host:port from user settings if the internal Kokoro URL returned differs
+              try {
+                const urlObj = new URL(url);
+                const baseObj = new URL(userKokoroBaseUrl);
+                urlObj.protocol = baseObj.protocol;
+                urlObj.host = baseObj.host;
+                urlObj.port = baseObj.port;
+                audioUrl = urlObj.toString();
+              } catch (e) {
+                // Fallback
+                audioUrl = url;
+              }
             } else {
-                const cleanUrlPath = url.replace(/^\/+/, '');
-                audioUrl = `${userKokoroBaseUrl}/${cleanUrlPath}`;
+              const cleanUrlPath = url.replace(/^\/+/, '');
+              audioUrl = `${userKokoroBaseUrl}/${cleanUrlPath}`;
             }
 
             try {
@@ -1285,8 +1290,8 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
               if (audioRes.ok) {
                 const cType = audioRes.headers.get('content-type') || '';
                 if (!cType.includes('audio') && !cType.includes('video') && !cType.includes('octet-stream')) {
-                    console.error(`Downloaded chunk from ${audioUrl} but content-type is ${cType}, expecting audio! Skipping.`);
-                    continue;
+                  console.error(`Downloaded chunk from ${audioUrl} but content-type is ${cType}, expecting audio! Skipping.`);
+                  continue;
                 }
                 const buffer = await audioRes.buffer();
                 const ext = audioUrl.match(/\.(\w+)(?:[\?#]|$)/)?.[1] || 'wav';
