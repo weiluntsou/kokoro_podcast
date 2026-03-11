@@ -911,6 +911,7 @@ function showScriptPreview(script) {
     section.style.display = 'block';
 
     // Try to parse the script as JSON array, fallback to simple regex
+    const lines = [];
     try {
         const jsonScript = script.replace(/^```(?:json|python|javascript)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
         const data = JSON.parse(jsonScript);
