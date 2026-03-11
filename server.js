@@ -1004,11 +1004,13 @@ IMPORTANT: A normal speaking rate is about 200 words per minute. To hit the ${nu
 ⚠️ 重要要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${numMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${targetWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與寒暄，來擴充內容長度，切忌空洞重複。`;
 
     const prompt = `${subPrompt}
-⚠️ 嚴格輸出限制：你必須『只』輸出一個合法的 JSON Array 陣列格式，絕對不要包含 Markdown 標記 (如 \`\`\`json )，不要前言結語。內容請使用標準雙引號 (") 以及正確的跳脫字元！格式範例：
-[
-    ["host_f", "大家好..."],
-    ["host_m", "沒錯..."]
-]
+⚠️ 嚴格輸出限制：你必須『只』使用純文字格式，絕對不要包含任何 JSON、陣列或寫程式碼的結構 (如 \`\`\`json )，也不要前言結語！
+請使用以下固定格式，在每一句話的最前面加上發言人的標註：
+[host_f]
+大家好...
+
+[host_m]
+沒錯...
 
 內容標題：${noteTitle || '未命名'}
 使用語言：${isEnglish ? 'English' : '繁體中文'}
@@ -1035,7 +1037,7 @@ ${noteContents}`;
     let script = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     // Clean up: remove markdown code block markers if present
-    script = script.replace(/^```(?:json|python|javascript)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
+    script = script.replace(/^```(?:json|python|javascript|text)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
     res.json({ success: true, script });
   } catch (error) {
@@ -1053,35 +1055,23 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     const settings = getSettings();
     const podcastId = Date.now().toString();
 
-    // Parse the script into a JS array
-    let scriptData;
+    // Parse the script into a JS array from plain text format
+    let scriptData = [];
     try {
-      // First attempt: clean parse directly (since we prompted for JSON)
-      const cleanJson = script.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-      scriptData = JSON.parse(cleanJson);
+        const blocks = script.split(/\[(host_[fm])\]/i);
+        for (let i = 1; i < blocks.length; i += 2) {
+            const speaker = blocks[i].toLowerCase();
+            const text = blocks[i+1].trim();
+            if (text) {
+                scriptData.push([speaker, text]);
+            }
+        }
     } catch (parseErr) {
-      console.error('Clean JSON parse failed, trying fallback replacements:', parseErr.message);
-      try {
-        // Fallback: maybe they output python tuples?
-        const jsonStr = script
-          .replace(/\(/g, '[')
-          .replace(/\)/g, ']')
-          .replace(/'/g, '"');
-        scriptData = JSON.parse(jsonStr);
-      } catch (fallbackErr) {
-          console.error('Fallback JSON parse also failed, trying regex extraction:', fallbackErr.message);
-          scriptData = [];
-          // More robust fallback regex to grab everything between quotes after host_[fm]
-          const fallbackRegex = /\[\s*["'](host_[fm])["']\s*,\s*["']([\s\S]*?)["']\s*\]/g;
-          let match;
-          while ((match = fallbackRegex.exec(script.replace(/\(/g, '[').replace(/\)/g, ']'))) !== null) {
-            scriptData.push([match[1], match[2].replace(/\\"/g, '"').replace(/\\'/g, "'")]);
-          }
-      }
+        console.error('Text block parse error:', parseErr.message);
     }
 
     if (!scriptData || scriptData.length === 0) {
-      throw new Error('無法解析講稿格式，請確認是否為正確的 JSON 代碼');
+      throw new Error('無法解析純文字講稿標籤格式，請確認是否為帶有 [host_f] [host_m] 正確標註的內文');
     }
 
     // Assign voices based on language
@@ -1223,8 +1213,37 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
         } else if (typeof statusData.url === 'string') {
           urlsToDownload = [statusData.url];
         } else if (typeof statusData.file_path === 'string') {
-          // If the API returns file_path, download from /download/{task_id}
-          urlsToDownload = [`/download/${taskId}`];
+          // If the API returns file_path, try to guess the real download endpoint
+          // Since Kokoro-FastAPI might expose outputs directly, test multiple common paths
+          urlsToDownload = [];
+          const fn = statusData.filename;
+          const possiblePaths = [
+              `/download/${taskId}`,
+              `/audio/${fn}.wav`,
+              `/outputs/${fn}.wav`,
+              `/v1/audio/generations/${fn}.wav`,
+              `/${fn}.wav`
+          ];
+          
+          const cleanBaseUrl = kokoroBaseUrl.replace(/\/+$/, '');
+          for (const p of possiblePaths) {
+              const testUrl = `${cleanBaseUrl}${p}`;
+              try {
+                  const headRes = await fetch(testUrl);
+                  if (headRes.ok) {
+                      const cType = headRes.headers.get('content-type') || '';
+                      if (cType.includes('audio') || cType.includes('video') || cType === 'application/octet-stream') {
+                          urlsToDownload = [testUrl];
+                          console.log(`Found valid audio file endpoint at: ${testUrl}`);
+                          break;
+                      }
+                  }
+              } catch (e) { /* ignore */ }
+          }
+          
+          if (urlsToDownload.length === 0) {
+              console.error('Could not find a valid audio download URL for the Kokoro task.');
+          }
         }
 
         console.log('urlsToDownload evaluated to:', urlsToDownload);
@@ -1264,6 +1283,11 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
               console.log(`Downloading audio chunk from: ${audioUrl}`);
               const audioRes = await fetch(audioUrl);
               if (audioRes.ok) {
+                const cType = audioRes.headers.get('content-type') || '';
+                if (!cType.includes('audio') && !cType.includes('video') && !cType.includes('octet-stream')) {
+                    console.error(`Downloaded chunk from ${audioUrl} but content-type is ${cType}, expecting audio! Skipping.`);
+                    continue;
+                }
                 const buffer = await audioRes.buffer();
                 const ext = audioUrl.match(/\.(\w+)(?:[\?#]|$)/)?.[1] || 'wav';
                 const tempFile = path.join(AUDIO_DIR, `temp_${podcast.id}_${i}.${ext}`);

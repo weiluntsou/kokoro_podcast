@@ -910,27 +910,21 @@ function showScriptPreview(script) {
     const preview = document.getElementById('scriptPreview');
     section.style.display = 'block';
 
-    // Try to parse the script as JSON array, fallback to simple regex
+    // Try to parse the script from plain text block format
     const lines = [];
     try {
-        const jsonScript = script.replace(/^```(?:json|python|javascript)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-        const data = JSON.parse(jsonScript);
-        data.forEach(([speaker, text]) => {
-            const displayName = speaker === 'host_f' ? '曉曉(F)' : '雲健(M)';
-            const cssClass = speaker === 'host_f' ? 'speaker-a' : 'speaker-b';
-            lines.push(`<div><span class="${cssClass}">${displayName}：</span>${escapeHtml(text)}</div>`);
-        });
-    } catch (e) {
-        // Fallback robust regex
-        const fallbackRegex = /\[\s*["'](host_[fm])["']\s*,\s*["']([\s\S]*?)["']\s*\]/g;
-        let match;
-        while ((match = fallbackRegex.exec(script.replace(/\(/g, '[').replace(/\)/g, ']'))) !== null) {
-            const speaker = match[1];
-            const text = match[2].replace(/\\"/g, '"').replace(/\\'/g, "'");
-            const displayName = speaker === 'host_f' ? '曉曉(F)' : '雲健(M)';
-            const cssClass = speaker === 'host_f' ? 'speaker-a' : 'speaker-b';
-            lines.push(`<div><span class="${cssClass}">${displayName}：</span>${escapeHtml(text)}</div>`);
+        const blocks = script.split(/\[(host_[fm])\]/i);
+        for (let i = 1; i < blocks.length; i += 2) {
+            const speaker = blocks[i].toLowerCase();
+            const text = blocks[i+1].trim();
+            if (text) {
+                const displayName = speaker === 'host_f' ? '曉曉(F)' : '雲健(M)';
+                const cssClass = speaker === 'host_f' ? 'speaker-a' : 'speaker-b';
+                lines.push(`<div><span class="${cssClass}">${displayName}：</span>${escapeHtml(text)}</div>`);
+            }
         }
+    } catch (e) {
+        console.error('Preview parsing error', e);
     }
 
     if (lines.length === 0) {
