@@ -721,9 +721,13 @@ app.post('/api/whisper/transcribe', async (req, res) => {
     });
 
     if (!whisperRes.ok) {
+      // Record first error
+      const errText1 = await whisperRes.text().catch(() => '');
+      
       // Try alternative endpoint
       const formData2 = new FormData();
       formData2.append('file', fs.createReadStream(audioFile));
+      formData2.append('response_format', 'json'); // Sometimes needed for inference too
 
       const whisperRes2 = await fetch(`${settings.whisperUrl}/inference`, {
         method: 'POST',
@@ -731,13 +735,17 @@ app.post('/api/whisper/transcribe', async (req, res) => {
         headers: formData2.getHeaders()
       });
 
-      if (!whisperRes2.ok) throw new Error(`Whisper API 錯誤: ${whisperRes2.status}`);
+      if (!whisperRes2.ok) {
+        const errText2 = await whisperRes2.text().catch(() => '');
+        throw new Error(`Whisper API 錯誤: ${whisperRes2.status} (嘗試了 /v1/audio/transcriptions: [${whisperRes.status}] ${errText1.substring(0, 50)} 及 /inference: [${whisperRes2.status}] ${errText2.substring(0, 50)})`);
+      }
+      
       const data = await whisperRes2.json();
       return res.json({ success: true, text: data.text || data.transcription || '' });
     }
 
     const data = await whisperRes.json();
-    res.json({ success: true, text: data.text || '' });
+    res.json({ success: true, text: data.text || data.transcription || '' });
   } catch (error) {
     console.error('Whisper error:', error.message);
     res.status(500).json({ error: `轉錄失敗: ${error.message}` });
