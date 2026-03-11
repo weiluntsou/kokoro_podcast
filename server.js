@@ -1230,11 +1230,29 @@ app.get('/api/podcast/task-status/:taskId', async (req, res) => {
             let url = urlsToDownload[i];
             
             // If url is literally just the path like /download/xxx, prepend kokoroBaseUrl correctly
-            const cleanBaseUrl = kokoroBaseUrl.replace(/\/+$/, '');
-            const cleanUrlPath = url.replace(/^\/+/, '');
-            const audioUrl = url.startsWith('http')
-              ? url
-              : `${cleanBaseUrl}/${cleanUrlPath}`;
+            // The user's settings.kokoroUrl might be http://localhost:8880, but the API may return a string like `http://localhost:8000/download/xxx` if Kokoro's internal host config differs.
+            // We must force the download to use the host/port defined in the user settings!
+            
+            const userKokoroBaseUrl = settings.kokoroUrl.replace(/\/v1\/?$/, '').replace(/\/+$/, '').replace(/\/generate_podcast\/?$/, '');
+            let audioUrl = url;
+
+            if (url.startsWith('http')) {
+                // Force the host:port from user settings if the internal Kokoro URL returned differs
+                try {
+                    const urlObj = new URL(url);
+                    const baseObj = new URL(userKokoroBaseUrl);
+                    urlObj.protocol = baseObj.protocol;
+                    urlObj.host = baseObj.host;
+                    urlObj.port = baseObj.port;
+                    audioUrl = urlObj.toString();
+                } catch (e) {
+                    // Fallback
+                    audioUrl = url;
+                }
+            } else {
+                const cleanUrlPath = url.replace(/^\/+/, '');
+                audioUrl = `${userKokoroBaseUrl}/${cleanUrlPath}`;
+            }
 
             try {
               console.log(`Downloading audio chunk from: ${audioUrl}`);
