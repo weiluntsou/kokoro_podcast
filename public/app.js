@@ -322,6 +322,22 @@ const TaskQueue = {
     }
 };
 
+// Formats original X post text for readability
+function formatOriginalText(text) {
+    if (!text) return '';
+    return text
+        // Remove trailing media URLs
+        .replace(/https?:\/\/(t\.co|x\.com|twitter\.com)\/\S+/g, '')
+        // Remove repetitive newlines
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '') // remove invisible spaces/zero-width chars
+        .trim()
+        // Format as a markdown blockquote
+        .split('\n')
+        .map(line => line.trim() ? `> ${line.trim()}` : '>')
+        .join('\n');
+}
+
 // ─── Process X Post ───────────────────────────────────
 function enqueueProcessPost() {
     const url = document.getElementById('postUrl').value.trim();
@@ -423,7 +439,8 @@ async function processPostWorker(task) {
 
         // Append the source url, author, and original text to the note
         const authorInfo = currentTweet.author ? `- **推文作者：** @${currentTweet.author}\n` : '';
-        const originalTextInfo = currentTweet.text ? `\n**原始貼文內容：**\n\n${currentTweet.text}` : '';
+        const formattedOriginalText = formatOriginalText(currentTweet.text);
+        const originalTextInfo = formattedOriginalText ? `\n**原始貼文內容：**\n\n${formattedOriginalText}` : '';
         const transcriptInfo = (currentTweet.hasVideo && currentVideoPath && contentForNote.includes('影片逐字稿：\n')) ? `\n\n**影片逐字稿：**\n\n${contentForNote.split('影片逐字稿：\n')[1] || ''}` : '';
         
         const finalNoteContent = `${noteData.text}\n\n---\n\n### 原始來源與內容\n\n- **來源連結：** ${url}\n${authorInfo}${originalTextInfo}${transcriptInfo}`;
