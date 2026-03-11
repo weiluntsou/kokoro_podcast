@@ -1087,11 +1087,26 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
         voiceM = 'am_eric';
     }
 
-    // Replace generic host tags with specific Kokoro voice IDs
-    scriptData = scriptData.map(([speaker, text]) => {
-        if (speaker === 'host_f') return [voiceF, text];
-        if (speaker === 'host_m') return [voiceM, text];
-        return [speaker, text];
+    // Replace generic host tags with specific Kokoro voice IDs and strictly chunk long texts
+    let processedScript = [];
+    scriptData.forEach(([speaker, text]) => {
+        let finalSpeaker = speaker;
+        if (speaker === 'host_f') finalSpeaker = voiceF;
+        else if (speaker === 'host_m') finalSpeaker = voiceM;
+
+        // Split text by common punctuation to avoid PyTorch tensor size limits (usually >250-300 chars crashes Kokoro)
+        const sentences = text.split(/(?<=[。！？；.!?;\n])\s*/).filter(s => s.trim().length > 0);
+        
+        let currentChunk = '';
+        sentences.forEach(sentence => {
+            if (currentChunk.length + sentence.length > 200) {
+                if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
+                currentChunk = sentence;
+            } else {
+                currentChunk += (currentChunk ? ' ' : '') + sentence;
+            }
+        });
+        if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
     });
 
     // Ensure we don't include /v1 or /generate_podcast in the base URL for these custom endpoints
@@ -1101,7 +1116,7 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     // Generate filename strictly as English alphanumeric (Kokoro API requirement)
     const filename = `podcast_${Date.now()}`;
 
-    console.log(`Sending to Kokoro: url=${kokoroBaseUrl}/generate_podcast, filename=${filename}, segments=${scriptData.length}, voices=${voiceF}/${voiceM}`);
+    console.log(`Sending to Kokoro: url=${kokoroBaseUrl}/generate_podcast, filename=${filename}, parsed_segments=${processedScript.length}, voices=${voiceF}/${voiceM}`);
 
     // Send to Kokoro generate_podcast API
 
@@ -1110,7 +1125,7 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         filename: filename,
-        script: scriptData,
+        script: processedScript,
         speed: 0.9  // Slow down speech speed by 10%
       })
     });
