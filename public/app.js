@@ -421,6 +421,13 @@ async function processPostWorker(task) {
 
         if (!noteData.success) throw new Error(noteData.error);
 
+        // Append the source url, author, and original text to the note
+        const authorInfo = currentTweet.author ? `- **推文作者：** @${currentTweet.author}\n` : '';
+        const originalTextInfo = currentTweet.text ? `\n**原始貼文內容：**\n\n${currentTweet.text}` : '';
+        const transcriptInfo = (currentTweet.hasVideo && currentVideoPath && contentForNote.includes('影片逐字稿：\n')) ? `\n\n**影片逐字稿：**\n\n${contentForNote.split('影片逐字稿：\n')[1] || ''}` : '';
+        
+        const finalNoteContent = `${noteData.text}\n\n---\n\n### 原始來源與內容\n\n- **來源連結：** ${url}\n${authorInfo}${originalTextInfo}${transcriptInfo}`;
+
         // Step 4: Save to HedgeDoc
         setStep('save');
         TaskQueue.updateTask(task.id, '儲存至 HedgeDoc...');
@@ -432,7 +439,7 @@ async function processPostWorker(task) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                content: noteData.text,
+                content: finalNoteContent,
                 title: noteTitle,
                 sourceUrl: url
             })
@@ -440,7 +447,7 @@ async function processPostWorker(task) {
         const saveData = await saveRes.json();
 
         // Show result
-        showNoteResult(noteData.text, saveData.success ? saveData.note : null);
+        showNoteResult(finalNoteContent, saveData.success ? saveData.note : null);
     } catch (e) {
         console.error(e);
         throw e;
