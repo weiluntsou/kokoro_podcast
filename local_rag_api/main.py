@@ -39,11 +39,11 @@ async def ask_database(request: QueryRequest):
         query_vector = embedder.encode(user_query).tolist()
         
         # 2. 在 Qdrant 中進行搜尋
-        search_results = qdrant.search(
+        search_results = qdrant.query_points(
             collection_name=COLLECTION_NAME,
-            query_vector=query_vector,
+            query=query_vector,
             limit=request.top_k
-        )
+        ).points
         
         # 3. 提取檢索到的文本內容
         retrieved_texts = [hit.payload.get("text", "") for hit in search_results if "text" in hit.payload]

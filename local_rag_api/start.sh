@@ -10,8 +10,13 @@ fi
 
 source venv/bin/activate
 echo "啟動 FastAPI 伺服器中..."
-# 預先安裝 PyTorch，若在 Linux (例如 Docker 內) 則優先強制使用 CPU 版本以避免下載龐大的 NVIDIA CUDA 函式庫
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-pip install fastapi uvicorn qdrant-client ollama sentence-transformers pydantic
+if [ ! -f "venv/.installed" ]; then
+    echo "正在安裝必要的套件 (初次安裝或更新)..."
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+    pip install fastapi uvicorn qdrant-client ollama sentence-transformers pydantic
+    touch venv/.installed
+else
+    echo "套件已安裝，跳過檢查。"
+fi
 
 uvicorn main:app --reload --host 0.0.0.0 --port 8866
