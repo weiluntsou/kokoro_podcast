@@ -161,7 +161,8 @@ async def ask_database(request: QueryRequest):
             }
             req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'}, method='POST')
             try:
-                with urllib.request.urlopen(req) as resp:
+                print("==> 正在透過 Gemini API 生成...", flush=True)
+                with urllib.request.urlopen(req, timeout=30) as resp:
                     resp_data = json.loads(resp.read().decode('utf-8'))
                     answer = resp_data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
             except Exception as e:
@@ -169,6 +170,7 @@ async def ask_database(request: QueryRequest):
                 answer = f"Gemini API 呼叫失敗: {str(e)}"
         else:
             # 降級使用 Ollama
+            print("==> Gemini API Key 未提供，已降級使用 Ollama 進行生成 (這可能需要數十秒到數分鐘)...", flush=True)
             response = ollama.chat(model=model_to_use, messages=[
                 {'role': 'user', 'content': prompt}
             ])
