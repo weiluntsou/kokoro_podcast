@@ -45,7 +45,7 @@ function getSettings() {
     hedgedocCookie: '',
     whisperUrl: 'http://localhost:8080',
     kokoroUrl: 'http://localhost:8880',
-    ragUrl: 'http://localhost:8000',
+    ragUrl: 'http://localhost:8866',
     ragModel: 'sorc/qwen3.5-instruct:0.8b',
     xCookie: ''
   });
@@ -1393,7 +1393,7 @@ app.post('/api/rag/ask', async (req, res) => {
   try {
     const { query, top_k } = req.body;
     const settings = getSettings();
-    const ragBaseUrl = (settings.ragUrl || 'http://localhost:8000').replace(/\/$/, '');
+    const ragBaseUrl = (settings.ragUrl || 'http://localhost:8866').replace(/\/$/, '');
 
     const ragRes = await fetch(`${ragBaseUrl}/ask`, {
       method: 'POST',

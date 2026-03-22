@@ -14,4 +14,4 @@ echo "啟動 FastAPI 伺服器中..."
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install fastapi uvicorn qdrant-client ollama sentence-transformers pydantic
 
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+uvicorn main:app --reload --host 0.0.0.0 --port 8866

@@ -129,7 +129,7 @@ async function loadSettings() {
         document.getElementById('settingHedgedocCookie').value = settings.hedgedocCookie || '';
         document.getElementById('settingWhisperUrl').value = settings.whisperUrl || 'http://localhost:8080';
         document.getElementById('settingKokoroUrl').value = settings.kokoroUrl || 'http://localhost:8880';
-        document.getElementById('settingRagUrl').value = settings.ragUrl || 'http://localhost:8000';
+        document.getElementById('settingRagUrl').value = settings.ragUrl || 'http://localhost:8866';
         document.getElementById('settingRagModel').value = settings.ragModel || 'sorc/qwen3.5-instruct:0.8b';
         document.getElementById('settingXCookie').value = settings.xCookie || '';
     } catch (e) {
@@ -1365,7 +1365,7 @@ async function askRag() {
     const sourcesDiv = document.getElementById('ragSources');
 
     // Get RAG URL from settings
-    const ragUrl = document.getElementById('settingRagUrl').value.trim() || 'http://localhost:8000';
+    const ragUrl = document.getElementById('settingRagUrl').value.trim() || 'http://localhost:8866';
 
     try {
         btn.disabled = true;
