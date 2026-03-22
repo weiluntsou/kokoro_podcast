@@ -38,18 +38,37 @@ async def ask_database(request: QueryRequest):
         # 1. 將使用者查詢轉換為向量
         query_vector = embedder.encode(user_query).tolist()
         
-        # 2. 在 Qdrant 中進行搜尋
-        search_results = qdrant.query_points(
-            collection_name=COLLECTION_NAME,
-            query=query_vector,
-            limit=request.top_k
-        ).points
+        # 1.5 檢查各個知識庫集合
+        target_collections = ["hedgedoc_notes", "obsidian_notes"]
+        all_points = []
+        
+        # 2. 跨多個 Table (Collection) 搜尋
+        for collection_name in target_collections:
+            if qdrant.collection_exists(collection_name=collection_name):
+                res = qdrant.query_points(
+                    collection_name=collection_name,
+                    query=query_vector,
+                    limit=request.top_k
+                )
+                all_points.extend(res.points)
+
+        if not all_points:
+            return {
+                "query": user_query,
+                "answer": "在目標的向量資料庫表 (`hedgedoc_notes`, `obsidian_notes`) 中找不到任何可用關聯資料，可能為空或尚未寫入。", 
+                "source_documents": []
+            }
+            
+        # 根據相似度分數由高到低排序，因為我們混合了兩個資料表，只留取總和最強的前 top_k 個
+        all_points.sort(key=lambda p: p.score, reverse=True)
+        best_points = all_points[:request.top_k]
         
         # 3. 提取檢索到的文本內容
-        retrieved_texts = [hit.payload.get("text", "") for hit in search_results if "text" in hit.payload]
+        # 支援 "text" 或 "content" 兩種常見的鍵名
+        retrieved_texts = [hit.payload.get("text", hit.payload.get("content", str(hit.payload))) for hit in best_points if hit.payload]
         context_text = "\n---\n".join(retrieved_texts)
 
-        if not context_text:
+        if not context_text.strip():
             return {
                 "query": user_query,
                 "answer": "在資料庫中找不到相關資訊。", 
