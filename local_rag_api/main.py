@@ -69,10 +69,13 @@ async def ask_database(request: QueryRequest):
         # 根據來源表優先權與相似度分數由高到低排序
         # 優先考量 hedgedoc_notes 回傳的結果，其次才補上 obsidian_notes 的資料
         all_points.sort(key=lambda x: (1 if x[0] == "hedgedoc_notes" else 0, x[1].score), reverse=True)
-        best_points = [x[1] for x in all_points[:request.top_k]]
+        best_points = all_points[:request.top_k]
         
         # 3. 提取檢索到的文本內容，並進行相關斷落裁切以加快回應速度
-        retrieved_texts_raw = [hit.payload.get("text", hit.payload.get("content", str(hit.payload))) for hit in best_points if hit.payload]
+        retrieved_texts_raw = []
+        for coll, hit in best_points:
+            p_text = hit.payload.get("text", hit.payload.get("content", str(hit.payload))) if hit.payload else ""
+            retrieved_texts_raw.append(str(p_text))
         
         # 簡單切出關鍵字尋找焦點，若都沒有則只找原句
         keywords = [k for k in re.split(r'\W+', user_query) if len(k) >= 2]
@@ -83,8 +86,9 @@ async def ask_database(request: QueryRequest):
         total_length = 0
 
         for text in retrieved_texts_raw:
-            text = str(text).strip()
+            text = text.strip()
             if not text:
+                truncated_texts.append("")
                 continue
                 
             # 尋找關鍵字的第一個匹配位置
@@ -113,7 +117,7 @@ async def ask_database(request: QueryRequest):
             truncated_texts.append(chunk)
             total_length += len(chunk)
 
-        context_text = "\n---\n".join(truncated_texts)
+        context_text = "\n---\n".join([t for t in truncated_texts if t])
 
         if not context_text.strip():
             return {
@@ -122,8 +126,26 @@ async def ask_database(request: QueryRequest):
                 "source_documents": []
             }
         
-        # 將傳給前端看的來源也更換為截取過的精華版
-        retrieved_texts = truncated_texts
+        # 重新打包給前端的詳細來源列表 (帶有連結和標題等 Metadata)
+        source_docs_formatted = []
+        for i, snippet in enumerate(truncated_texts):
+            if i >= len(best_points) or not snippet:
+                continue
+            coll, hit = best_points[i]
+            payload = hit.payload or {}
+            
+            # 嘗試取得網址與標題
+            url = payload.get("url", payload.get("source", payload.get("id", "")))
+            title = payload.get("title", url if url else "未命名參考資料")
+            
+            source_docs_formatted.append({
+                "text": snippet,
+                "url": url,
+                "title": title,
+                "collection": coll
+            })
+
+        retrieved_texts = source_docs_formatted
 
         # 4. 構建 Prompt 並調用 Ollama 或 Gemini
         prompt = f"你是一個專業且精準的助手。請「僅根據以下提供的參考資料」來回答使用者的問題。\n如果參考資料中無法回答該問題，請誠實地說你不知道。\n\n[參考資料開始]\n{context_text}\n[參考資料結束]\n\n使用者問題：{user_query}\n\n請提供你的回答："

@@ -1368,9 +1368,38 @@ async function askRag() {
     const ragUrl = document.getElementById('settingRagUrl').value.trim() || 'http://localhost:8866';
 
     try {
+        const geminiKey = document.getElementById('settingGeminiKey').value.trim();
+        const activeModel = geminiKey ? (document.getElementById('settingGeminiModel').value || 'gemini-2.5-flash') : (document.getElementById('settingRagModel').value || 'sorc/qwen3.5-instruct:0.8b');
+
         btn.disabled = true;
         btnText.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;border-top-color:white;"></span> 查詢中...';
         
+        let statusDiv = document.getElementById('ragMetaStatus');
+        if (!statusDiv) {
+            statusDiv = document.createElement('div');
+            statusDiv.id = 'ragMetaStatus';
+            statusDiv.style = "font-size: 13px; color: var(--text-muted); margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 6px; display: flex; align-items: center; justify-content: space-between;";
+            answerDiv.parentNode.insertBefore(statusDiv, answerDiv);
+        }
+        
+        resultCard.style.display = 'block';
+        answerDiv.innerHTML = '';
+        sourcesDiv.innerHTML = '';
+        
+        let startTime = Date.now();
+        window.ragTimerInterval = setInterval(() => {
+            let elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+            let stage = '發送請求中...';
+            if (elapsed > 0.5 && elapsed < 2.0) stage = '🔍 尋找關聯文獻...';
+            else if (elapsed >= 2.0) stage = '🧠 等候 LLM 生成解答...';
+            
+            statusDiv.innerHTML = `
+                <span><b>🧠 模型:</b> ${escapeHtml(activeModel)}</span>
+                <span><b>🔄 階段:</b> <span style="color:var(--accent-info)">${stage}</span></span>
+                <span><b>⏳ 耗時:</b> ${elapsed}s</span>
+            `;
+        }, 100);
+
         const res = await fetch(`${API}/api/rag/ask`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -1392,18 +1421,41 @@ async function askRag() {
 
         const data = await res.json();
         
+        if (window.ragTimerInterval) clearInterval(window.ragTimerInterval);
+        const finalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+        statusDiv = document.getElementById('ragMetaStatus');
+        if (statusDiv) {
+            statusDiv.innerHTML = `
+                <span><b>🧠 模型:</b> ${escapeHtml(activeModel)}</span>
+                <span><b>✅ 階段:</b> <span style="color:#10b981">處理完成</span></span>
+                <span><b>⏳ 總耗時:</b> ${finalTime}s</span>
+            `;
+        }
+        
         // Show result
         resultCard.style.display = 'block';
         answerDiv.innerHTML = renderMarkdown(data.answer);
         
         // Show sources
         if (data.source_documents && data.source_documents.length > 0) {
-            sourcesDiv.innerHTML = data.source_documents.map((doc, i) => `
+            sourcesDiv.innerHTML = data.source_documents.map((doc, i) => {
+                const text = typeof doc === 'object' && doc.text ? doc.text : doc;
+                const titleHtml = typeof doc === 'object' && doc.title ? `<span style="font-weight:600; font-size:13px; color:var(--text-primary); margin-left:6px;">${escapeHtml(doc.title)}</span>` : '';
+                const linkHtml = typeof doc === 'object' && doc.url && doc.url.startsWith('http') ? `<a href="${escapeHtml(doc.url)}" target="_blank" style="margin-left:auto; color:var(--accent-info); font-size:12px; text-decoration:none;">🔗 開啟來源</a>` : '';
+                const collBadge = typeof doc === 'object' && doc.collection ? `<span style="background:var(--bg-card); padding:2px 8px; border-radius:12px; font-size:10px; border:1px solid var(--border); margin-left:6px;">${escapeHtml(doc.collection)}</span>` : '';
+
+                return `
                 <div style="background:var(--bg-card-hover); border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:10px;">
-                    <div style="font-size:12px; font-weight:600; color:var(--accent-primary); margin-bottom:4px;">[來源 ${i+1}]</div>
-                    <div style="font-size:14px; color:var(--text-primary); white-space:pre-wrap;">${escapeHtml(doc)}</div>
+                    <div style="display:flex; align-items:center; margin-bottom:6px; flex-wrap:wrap;">
+                        <span style="font-size:12px; font-weight:600; color:var(--accent-primary);">[來源 ${i+1}]</span>
+                        ${collBadge}
+                        ${titleHtml}
+                        ${linkHtml}
+                    </div>
+                    <div style="font-size:14px; color:var(--text-primary); white-space:pre-wrap; line-height: 1.6;">${escapeHtml(text)}</div>
                 </div>
-            `).join('');
+            `;
+            }).join('');
         } else {
             sourcesDiv.innerHTML = '<p style="font-size:14px; color:var(--text-muted);">無參考資料</p>';
         }
@@ -1414,6 +1466,7 @@ async function askRag() {
         resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     } catch (e) {
+        if (window.ragTimerInterval) clearInterval(window.ragTimerInterval);
         console.error('RAG query error:', e);
         showToast(`查詢失敗: ${e.message}`, 'error');
     } finally {
