@@ -54,7 +54,9 @@ async def ask_database(request: QueryRequest):
                     query=query_vector,
                     limit=request.top_k
                 )
-                all_points.extend(res.points)
+                # 記錄來源所在的資料表，以利後續決定優先權
+                for point in res.points:
+                    all_points.append((collection_name, point))
 
         if not all_points:
             return {
@@ -63,9 +65,10 @@ async def ask_database(request: QueryRequest):
                 "source_documents": []
             }
             
-        # 根據相似度分數由高到低排序，因為我們混合了兩個資料表，只留取總和最強的前 top_k 個
-        all_points.sort(key=lambda p: p.score, reverse=True)
-        best_points = all_points[:request.top_k]
+        # 根據來源表優先權與相似度分數由高到低排序
+        # 優先考量 hedgedoc_notes 回傳的結果，其次才補上 obsidian_notes 的資料
+        all_points.sort(key=lambda x: (1 if x[0] == "hedgedoc_notes" else 0, x[1].score), reverse=True)
+        best_points = [x[1] for x in all_points[:request.top_k]]
         
         # 3. 提取檢索到的文本內容
         # 支援 "text" 或 "content" 兩種常見的鍵名
