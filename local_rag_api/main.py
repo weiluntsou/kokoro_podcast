@@ -8,6 +8,7 @@ import os
 import json
 import urllib.request
 import re
+import difflib
 
 app = FastAPI(title="Local RAG API", description="使用 Qwen 與 Qdrant 的本地端知識庫查詢")
 
@@ -66,16 +67,10 @@ async def ask_database(request: QueryRequest):
                 "source_documents": []
             }
             
-        # 根據來源表優先權與相似度分數由高到低排序
-        # 優先考量 hedgedoc_notes 回傳的結果，其次才補上 obsidian_notes 的資料
-        all_points.sort(key=lambda x: (1 if x[0] == "hedgedoc_notes" else 0, x[1].score), reverse=True)
-        best_points = all_points[:request.top_k]
-        
-        # 3. 提取檢索到的文本內容，並進行相關斷落裁切以加快回應速度
-        retrieved_texts_raw = []
-        for coll, hit in best_points:
-            p_text = hit.payload.get("text", hit.payload.get("content", str(hit.payload))) if hit.payload else ""
-            retrieved_texts_raw.append(str(p_text))
+        # 混合兩個資料表，依據分數排序 (給 hedgedoc_notes 額外 5% 加權，但絕對不會完全忽略高分的 obsidian_notes)
+        all_points.sort(key=lambda x: x[1].score * (1.05 if x[0] == "hedgedoc_notes" else 1.0), reverse=True)
+        # 先多留幾筆避免被重複過濾演算法刪光
+        candidate_points = all_points[:request.top_k * 2]
         
         # 簡單切出關鍵字尋找焦點，若都沒有則只找原句
         keywords = [k for k in re.split(r'\W+', user_query) if len(k) >= 2]
@@ -83,12 +78,13 @@ async def ask_database(request: QueryRequest):
             keywords = [user_query]
             
         truncated_texts = []
+        final_best_points = []
         total_length = 0
 
-        for text in retrieved_texts_raw:
-            text = text.strip()
+        for coll, hit in candidate_points:
+            p_text = hit.payload.get("text", hit.payload.get("content", str(hit.payload))) if hit.payload else ""
+            text = str(p_text).strip()
             if not text:
-                truncated_texts.append("")
                 continue
                 
             # 尋找關鍵字的第一個匹配位置
@@ -107,15 +103,31 @@ async def ask_database(request: QueryRequest):
             if start_pos + 200 < len(text):
                 chunk = chunk + "..."
                 
+            # 利用 difflib 過濾「重複或過於相似」的內容片段 (大於 70% 相似就當作重複拋棄)
+            is_duplicate = False
+            for exist_chunk in truncated_texts:
+                if difflib.SequenceMatcher(None, chunk, exist_chunk).ratio() > 0.70:
+                    is_duplicate = True
+                    break
+            
+            if is_duplicate:
+                continue
+                
             # 檢查總長度，不超過 1500 字
             if total_length + len(chunk) > 1500:
                 allowed_len = max(0, 1500 - total_length)
                 if allowed_len > 10:
                     truncated_texts.append(chunk[:allowed_len] + "...")
+                    final_best_points.append((coll, hit))
                 break
                 
             truncated_texts.append(chunk)
+            final_best_points.append((coll, hit))
             total_length += len(chunk)
+            
+            # 只要收集到足夠的獨特段落即可停止
+            if len(truncated_texts) >= request.top_k:
+                break
 
         context_text = "\n---\n".join([t for t in truncated_texts if t])
 
@@ -146,9 +158,7 @@ async def ask_database(request: QueryRequest):
         # 重新打包給前端的詳細來源列表 (帶有連結和標題等 Metadata)
         source_docs_formatted = []
         for i, snippet in enumerate(truncated_texts):
-            if i >= len(best_points) or not snippet:
-                continue
-            coll, hit = best_points[i]
+            coll, hit = final_best_points[i]
             payload = hit.payload or {}
             
             # 嘗試取得網址與標題
