@@ -1401,7 +1401,9 @@ app.post('/api/rag/ask', async (req, res) => {
       body: JSON.stringify({ 
         query, 
         top_k: top_k || 3,
-        model: settings.ragModel 
+        model: settings.ragModel,
+        gemini_api_key: settings.geminiApiKey,
+        gemini_model: settings.geminiModel
       })
     });
 

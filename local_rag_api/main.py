@@ -5,6 +5,8 @@ from qdrant_client import QdrantClient
 import ollama
 from sentence_transformers import SentenceTransformer
 import os
+import json
+import urllib.request
 
 app = FastAPI(title="Local RAG API", description="使用 Qwen 與 Qdrant 的本地端知識庫查詢")
 
@@ -29,6 +31,8 @@ class QueryRequest(BaseModel):
     query: str
     top_k: int = 3
     model: str = None
+    gemini_api_key: str = None
+    gemini_model: str = None
 
 @app.post("/ask")
 async def ask_database(request: QueryRequest):
@@ -75,16 +79,36 @@ async def ask_database(request: QueryRequest):
                 "source_documents": []
             }
 
-        # 4. 構建 Prompt 並調用 Ollama
+        # 4. 構建 Prompt 並調用 Ollama 或 Gemini
         prompt = f"你是一個專業且精準的助手。請「僅根據以下提供的參考資料」來回答使用者的問題。\n如果參考資料中無法回答該問題，請誠實地說你不知道。\n\n[參考資料開始]\n{context_text}\n[參考資料結束]\n\n使用者問題：{user_query}\n\n請提供你的回答："
 
-        response = ollama.chat(model=model_to_use, messages=[
-            {'role': 'user', 'content': prompt}
-        ])
+        answer = ""
+        if request.gemini_api_key:
+            # 使用 Gemini API 進行高階與快速的生成
+            gemini_model = request.gemini_model or "gemini-2.5-flash"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={request.gemini_api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {"temperature": 0.7, "maxOutputTokens": 8192}
+            }
+            req = urllib.request.Request(url, data=json.dumps(payload).encode('utf-8'), headers={'Content-Type': 'application/json'}, method='POST')
+            try:
+                with urllib.request.urlopen(req) as resp:
+                    resp_data = json.loads(resp.read().decode('utf-8'))
+                    answer = resp_data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+            except Exception as e:
+                print(f"Gemini API Error: {e}")
+                answer = f"Gemini API 呼叫失敗: {str(e)}"
+        else:
+            # 降級使用 Ollama
+            response = ollama.chat(model=model_to_use, messages=[
+                {'role': 'user', 'content': prompt}
+            ])
+            answer = response['message']['content']
         
         return {
             "query": user_query,
-            "answer": response['message']['content'],
+            "answer": answer,
             "source_documents": retrieved_texts
         }
     except Exception as e:
