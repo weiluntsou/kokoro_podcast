@@ -96,15 +96,15 @@ async def ask_database(request: QueryRequest):
             for kw in keywords:
                 idx = text.find(kw)
                 if idx != -1:
-                    # 找到關鍵字，抓前 200 字即可
-                    start_pos = max(0, idx - 200)
+                    # 找到關鍵字，改為抓前後各 100 字 (總共 200 字)
+                    start_pos = max(0, idx - 100)
                     break
             
-            # 從決定好的位置開始截取約 400 字 (前後共400代表前後各200字)
-            chunk = text[start_pos : start_pos + 400]
+            # 從決定好的位置開始截取約 200 字
+            chunk = text[start_pos : start_pos + 200]
             if start_pos > 0:
                 chunk = "..." + chunk
-            if start_pos + 400 < len(text):
+            if start_pos + 200 < len(text):
                 chunk = chunk + "..."
                 
             # 檢查總長度，不超過 1500 字
@@ -126,6 +126,23 @@ async def ask_database(request: QueryRequest):
                 "source_documents": []
             }
         
+        # 主動讀取 settings.json 來抓取 Gemini 金鑰與 Hedgedoc 網址，避免前臺 node.js 尚未重啟而沒收到參數的問題
+        gemini_api_key = request.gemini_api_key
+        gemini_model = request.gemini_model or "gemini-2.5-flash"
+        hedgedoc_base = ""
+
+        try:
+            settings_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'settings.json'))
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings_data = json.load(f)
+                    if not gemini_api_key:
+                        gemini_api_key = settings_data.get("geminiApiKey", "")
+                        gemini_model = settings_data.get("geminiModel", "gemini-2.5-flash")
+                    hedgedoc_base = settings_data.get("hedgedocUrl", "").rstrip('/')
+        except Exception:
+            pass
+
         # 重新打包給前端的詳細來源列表 (帶有連結和標題等 Metadata)
         source_docs_formatted = []
         for i, snippet in enumerate(truncated_texts):
@@ -136,6 +153,11 @@ async def ask_database(request: QueryRequest):
             
             # 嘗試取得網址與標題
             url = payload.get("url", payload.get("source", payload.get("id", "")))
+            
+            # 若為 hedgedoc，自動依據伺服器設定補完完整網址
+            if coll == "hedgedoc_notes" and hedgedoc_base and url and not url.startswith("http"):
+                url = f"{hedgedoc_base}/{url}"
+                
             title = payload.get("title", url if url else "未命名參考資料")
             
             source_docs_formatted.append({
@@ -151,10 +173,9 @@ async def ask_database(request: QueryRequest):
         prompt = f"你是一個專業且精準的助手。請「僅根據以下提供的參考資料」來回答使用者的問題。\n如果參考資料中無法回答該問題，請誠實地說你不知道。\n\n[參考資料開始]\n{context_text}\n[參考資料結束]\n\n使用者問題：{user_query}\n\n請提供你的回答："
 
         answer = ""
-        if request.gemini_api_key:
+        if gemini_api_key:
             # 使用 Gemini API 進行高階與快速的生成
-            gemini_model = request.gemini_model or "gemini-2.5-flash"
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={request.gemini_api_key}"
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{gemini_model}:generateContent?key={gemini_api_key}"
             payload = {
                 "contents": [{"parts": [{"text": prompt}]}],
                 "generationConfig": {"temperature": 0.7, "maxOutputTokens": 8192}
