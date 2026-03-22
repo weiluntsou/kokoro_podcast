@@ -129,6 +129,8 @@ async function loadSettings() {
         document.getElementById('settingHedgedocCookie').value = settings.hedgedocCookie || '';
         document.getElementById('settingWhisperUrl').value = settings.whisperUrl || 'http://localhost:8080';
         document.getElementById('settingKokoroUrl').value = settings.kokoroUrl || 'http://localhost:8880';
+        document.getElementById('settingRagUrl').value = settings.ragUrl || 'http://localhost:8000';
+        document.getElementById('settingRagModel').value = settings.ragModel || 'sorc/qwen3.5-instruct:0.8b';
         document.getElementById('settingXCookie').value = settings.xCookie || '';
     } catch (e) {
         console.error('Load settings error:', e);
@@ -144,6 +146,8 @@ async function saveSettings() {
             hedgedocCookie: document.getElementById('settingHedgedocCookie').value.trim(),
             whisperUrl: document.getElementById('settingWhisperUrl').value.trim().replace(/\/$/, ''),
             kokoroUrl: document.getElementById('settingKokoroUrl').value.trim().replace(/\/$/, ''),
+            ragUrl: document.getElementById('settingRagUrl').value.trim().replace(/\/$/, ''),
+            ragModel: document.getElementById('settingRagModel').value.trim(),
             xCookie: document.getElementById('settingXCookie').value.trim()
         };
 
@@ -1341,6 +1345,72 @@ function handleLockScreenTouchEnd(e) {
     if (unlockTimer) {
         clearTimeout(unlockTimer);
         unlockTimer = null;
+    }
+}
+
+
+// ─── Local RAG Query ──────────────────────────────────
+async function askRag() {
+    const query = document.getElementById('ragQuery').value.trim();
+    if (!query) {
+        showToast('請輸入查詢問題', 'error');
+        return;
+    }
+
+    const topK = parseInt(document.getElementById('ragTopK').value) || 3;
+    const btn = document.getElementById('btnRagQuery');
+    const btnText = document.getElementById('btnRagText');
+    const resultCard = document.getElementById('ragResult');
+    const answerDiv = document.getElementById('ragAnswer');
+    const sourcesDiv = document.getElementById('ragSources');
+
+    // Get RAG URL from settings
+    const ragUrl = document.getElementById('settingRagUrl').value.trim() || 'http://localhost:8000';
+
+    try {
+        btn.disabled = true;
+        btnText.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;border-top-color:white;"></span> 查詢中...';
+        
+        const res = await fetch(`${API}/api/rag/ask`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ query, top_k: topK })
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.detail || '查詢失敗');
+        }
+
+        const data = await res.json();
+        
+        // Show result
+        resultCard.style.display = 'block';
+        answerDiv.innerHTML = renderMarkdown(data.answer);
+        
+        // Show sources
+        if (data.source_documents && data.source_documents.length > 0) {
+            sourcesDiv.innerHTML = data.source_documents.map((doc, i) => `
+                <div style="background:var(--bg-card-hover); border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:10px;">
+                    <div style="font-size:12px; font-weight:600; color:var(--accent-primary); margin-bottom:4px;">[來源 ${i+1}]</div>
+                    <div style="font-size:14px; color:var(--text-primary); white-space:pre-wrap;">${escapeHtml(doc)}</div>
+                </div>
+            `).join('');
+        } else {
+            sourcesDiv.innerHTML = '<p style="font-size:14px; color:var(--text-muted);">無參考資料</p>';
+        }
+
+        showToast('查詢完成', 'success');
+        
+        // Scroll to result
+        resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    } catch (e) {
+        console.error('RAG query error:', e);
+        showToast(`查詢失敗: ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btnText.innerText = '🚀 查詢';
     }
 }
 

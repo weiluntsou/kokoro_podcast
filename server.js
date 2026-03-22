@@ -45,6 +45,8 @@ function getSettings() {
     hedgedocCookie: '',
     whisperUrl: 'http://localhost:8080',
     kokoroUrl: 'http://localhost:8880',
+    ragUrl: 'http://localhost:8000',
+    ragModel: 'sorc/qwen3.5-instruct:0.8b',
     xCookie: ''
   });
 }
@@ -1384,6 +1386,36 @@ app.delete('/api/podcast/:id', (req, res) => {
   const filtered = podcasts.filter(p => p.id !== req.params.id);
   saveJSON(PODCASTS_FILE, filtered);
   res.json({ success: true });
+});
+
+// ─── Local RAG Query Proxy ───────────────────────────────────
+app.post('/api/rag/ask', async (req, res) => {
+  try {
+    const { query, top_k } = req.body;
+    const settings = getSettings();
+    const ragBaseUrl = (settings.ragUrl || 'http://localhost:8000').replace(/\/$/, '');
+
+    const ragRes = await fetch(`${ragBaseUrl}/ask`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        query, 
+        top_k: top_k || 3,
+        model: settings.ragModel 
+      })
+    });
+
+    if (!ragRes.ok) {
+      const errText = await ragRes.text();
+      return res.status(ragRes.status).send(errText);
+    }
+
+    const data = await ragRes.json();
+    res.json(data);
+  } catch (error) {
+    console.error('RAG proxy error:', error.message);
+    res.status(500).json({ error: `RAG 查詢失敗 (可能後端 API 未啟動): ${error.message}` });
+  }
 });
 
 // ─── Fallback to SPA ─────────────────────────────────────────

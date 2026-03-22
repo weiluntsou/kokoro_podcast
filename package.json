@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
+    "start-server": "node server.js",
+    "start-rag": "./local_rag_api/start.sh",
+    "start": "concurrently \"npm run start-server\" \"npm run start-rag\"",
     "dev": "node server.js"
   },
   "keywords": [],
@@ -16,5 +18,8 @@
     "form-data": "^4.0.5",
     "multer": "^2.1.1",
     "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
   }
 }

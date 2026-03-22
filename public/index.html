@@ -31,6 +31,10 @@
         🎙️
         <span class="tooltip">Podcast</span>
       </button>
+      <button class="nav-btn" data-page="rag" id="nav-rag" onclick="switchPage('rag')">
+        🔍
+        <span class="tooltip">知識庫</span>
+      </button>
       <button class="nav-btn" data-page="settings" id="nav-settings" onclick="switchPage('settings')"
         style="margin-top:auto">
         ⚙️
@@ -328,6 +332,59 @@
       </div>
 
       <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Local RAG                                -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-rag" class="page">
+        <div class="page-header">
+          <h1>🔍 知識庫查詢 (RAG)</h1>
+          <p>聯網查詢本機 Qdrant 向量資料庫，並由 Ollama 生成回答</p>
+        </div>
+
+        <!-- Query Input -->
+        <div class="card">
+          <div class="card-header">
+            <div class="icon purple">🧩</div>
+            <div>
+              <h3>問題查詢</h3>
+              <p>輸入你的問題，系統將檢索知識庫並回答</p>
+            </div>
+          </div>
+          <div class="input-row">
+            <input type="text" id="ragQuery" placeholder="例如：這貼文提到的產品特點是什麼？" />
+            <button class="btn btn-primary" id="btnRagQuery" onclick="askRag()">
+              <span id="btnRagText">🚀 查詢</span>
+            </button>
+          </div>
+          <div class="input-group mt-3">
+             <label>檢索數量 (top-k)</label>
+             <input type="range" id="ragTopK" min="1" max="10" value="3" step="1" oninput="this.nextElementSibling.value = this.value" style="width:200px">
+             <output style="margin-left: 10px; font-weight: bold;">3</output>
+          </div>
+        </div>
+
+        <!-- RAG Result -->
+        <div id="ragResult" class="card" style="display:none">
+          <div class="card-header">
+            <div class="icon blue">🤖</div>
+            <div>
+              <h3>AI 回答</h3>
+              <p>基於檢索到的參考內容生成</p>
+            </div>
+          </div>
+          <div class="md-preview" id="ragAnswer" style="line-height: 1.8; font-size: 16px;"></div>
+          
+          <div style="margin-top: 24px;">
+            <h4 style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+               <span class="icon">📄</span> 參考資料
+            </h4>
+            <div id="ragSources" class="source-list">
+               <!-- Sources will be injected here -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
       <!-- PAGE: Settings                                 -->
       <!-- ═══════════════════════════════════════════════ -->
       <div id="page-settings" class="page">
@@ -382,6 +439,18 @@
             <div class="input-group">
               <label>API URL</label>
               <input type="url" id="settingKokoroUrl" placeholder="http://localhost:8880" />
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <h4><span class="icon">🔍</span> Local RAG API</h4>
+            <div class="input-group">
+              <label>API URL</label>
+              <input type="url" id="settingRagUrl" placeholder="http://localhost:8000" />
+            </div>
+            <div class="input-group">
+              <label>Ollama 模型</label>
+              <input type="text" id="settingRagModel" placeholder="sorc/qwen3.5-instruct:0.8b" />
             </div>
           </div>
 
