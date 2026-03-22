@@ -1407,7 +1407,13 @@ app.post('/api/rag/ask', async (req, res) => {
 
     if (!ragRes.ok) {
       const errText = await ragRes.text();
-      return res.status(ragRes.status).send(errText);
+      let errJson;
+      try {
+        errJson = JSON.parse(errText);
+      } catch (e) {
+        errJson = { detail: errText };
+      }
+      return res.status(ragRes.status).json(errJson);
     }
 
     const data = await ragRes.json();

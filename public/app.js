@@ -1378,8 +1378,16 @@ async function askRag() {
         });
 
         if (!res.ok) {
-            const err = await res.json();
-            throw new Error(err.detail || '查詢失敗');
+            const errText = await res.text();
+            let errorText = '查詢失敗';
+            try {
+                const errJson = JSON.parse(errText);
+                errorText = errJson.detail || errJson.error || errText;
+            } catch (e) {
+                // If not JSON, use the raw text or fallback
+                errorText = errText || '查詢失敗';
+            }
+            throw new Error(errorText);
         }
 
         const data = await res.json();
