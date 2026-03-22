@@ -7,6 +7,7 @@ from sentence_transformers import SentenceTransformer
 import os
 import json
 import urllib.request
+import re
 
 app = FastAPI(title="Local RAG API", description="使用 Qwen 與 Qdrant 的本地端知識庫查詢")
 
@@ -70,10 +71,49 @@ async def ask_database(request: QueryRequest):
         all_points.sort(key=lambda x: (1 if x[0] == "hedgedoc_notes" else 0, x[1].score), reverse=True)
         best_points = [x[1] for x in all_points[:request.top_k]]
         
-        # 3. 提取檢索到的文本內容
-        # 支援 "text" 或 "content" 兩種常見的鍵名
-        retrieved_texts = [hit.payload.get("text", hit.payload.get("content", str(hit.payload))) for hit in best_points if hit.payload]
-        context_text = "\n---\n".join(retrieved_texts)
+        # 3. 提取檢索到的文本內容，並進行相關斷落裁切以加快回應速度
+        retrieved_texts_raw = [hit.payload.get("text", hit.payload.get("content", str(hit.payload))) for hit in best_points if hit.payload]
+        
+        # 簡單切出關鍵字尋找焦點，若都沒有則只找原句
+        keywords = [k for k in re.split(r'\W+', user_query) if len(k) >= 2]
+        if not keywords:
+            keywords = [user_query]
+            
+        truncated_texts = []
+        total_length = 0
+
+        for text in retrieved_texts_raw:
+            text = str(text).strip()
+            if not text:
+                continue
+                
+            # 尋找關鍵字的第一個匹配位置
+            start_pos = 0
+            for kw in keywords:
+                idx = text.find(kw)
+                if idx != -1:
+                    # 找到關鍵字，抓前 200 字即可
+                    start_pos = max(0, idx - 200)
+                    break
+            
+            # 從決定好的位置開始截取約 400 字 (前後共400代表前後各200字)
+            chunk = text[start_pos : start_pos + 400]
+            if start_pos > 0:
+                chunk = "..." + chunk
+            if start_pos + 400 < len(text):
+                chunk = chunk + "..."
+                
+            # 檢查總長度，不超過 1500 字
+            if total_length + len(chunk) > 1500:
+                allowed_len = max(0, 1500 - total_length)
+                if allowed_len > 10:
+                    truncated_texts.append(chunk[:allowed_len] + "...")
+                break
+                
+            truncated_texts.append(chunk)
+            total_length += len(chunk)
+
+        context_text = "\n---\n".join(truncated_texts)
 
         if not context_text.strip():
             return {
@@ -81,6 +121,9 @@ async def ask_database(request: QueryRequest):
                 "answer": "在資料庫中找不到相關資訊。", 
                 "source_documents": []
             }
+        
+        # 將傳給前端看的來源也更換為截取過的精華版
+        retrieved_texts = truncated_texts
 
         # 4. 構建 Prompt 並調用 Ollama 或 Gemini
         prompt = f"你是一個專業且精準的助手。請「僅根據以下提供的參考資料」來回答使用者的問題。\n如果參考資料中無法回答該問題，請誠實地說你不知道。\n\n[參考資料開始]\n{context_text}\n[參考資料結束]\n\n使用者問題：{user_query}\n\n請提供你的回答："
