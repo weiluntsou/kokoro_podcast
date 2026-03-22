@@ -1433,6 +1433,7 @@ async function askRag() {
         }
         
         // Show result
+        window.lastRagData = { query, answer: data.answer, source_documents: data.source_documents };
         resultCard.style.display = 'block';
         answerDiv.innerHTML = renderMarkdown(data.answer);
         
@@ -1474,4 +1475,65 @@ async function askRag() {
         btnText.innerText = '🚀 查詢';
     }
 }
+
+// ─── Export RAG to HedgeDoc ──────────────────────────────────────────
+async function exportRagToHedgedoc() {
+    if (!window.lastRagData) return;
+    
+    const btn = document.getElementById('btnRagToHedgedoc');
+    const oldText = btn.innerHTML;
+    
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;border-top-color:white;margin-right:6px;"></span> 處理中...';
+        
+        const { query, answer, source_documents } = window.lastRagData;
+        
+        let mdContent = `###### tags: \`AI查詢\` \`RAG筆記\`\n# 🔍 查詢：${query}\n\n## 🤖 AI 解答\n${answer}\n\n---\n## 📚 參考資料\n`;
+        
+        if (source_documents && source_documents.length > 0) {
+            source_documents.forEach((doc, i) => {
+                const text = typeof doc === 'object' && doc.text ? doc.text : doc;
+                const title = typeof doc === 'object' && doc.title ? doc.title : `來源 ${i+1}`;
+                const url = typeof doc === 'object' && doc.url ? doc.url : '';
+                const coll = typeof doc === 'object' && doc.collection ? `[${doc.collection}]` : '';
+                
+                mdContent += `### ${i+1}. ${title} ${coll}\n`;
+                if (url && url.startsWith('http')) {
+                    mdContent += `- **來源連結：** [開啟原文](${url})\n`;
+                }
+                // Quote formatting for readability
+                mdContent += `\n> ${text.split('\\n').join('\\n> ')}\n\n`;
+            });
+        } else {
+            mdContent += `無參考資料\n`;
+        }
+        
+        const saveRes = await fetch(`${API}/api/hedgedoc/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: mdContent,
+                title: `RAG 查詢分享 - ${query.substring(0, 30)}`,
+            })
+        });
+        
+        const saveData = await saveRes.json();
+        if (!saveData.success) throw new Error(saveData.error || '儲存失敗');
+        
+        showToast('✅ 成功轉存至 HedgeDoc！', 'success');
+        if (saveData.note && saveData.note.url) {
+            // Automatically open the new HedgeDoc note in a fresh tab
+            window.open(saveData.note.url, '_blank');
+        }
+        
+    } catch (e) {
+        console.error('Export RAG error:', e);
+        showToast(`轉存失敗: ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = oldText;
+    }
+}
+
 
