@@ -28,7 +28,16 @@ OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "sorc/qwen3.5-instruct:0.8b")
 FEEDBACK_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'rag_feedback.json'))
 
 qdrant = QdrantClient(QDRANT_HOST, port=QDRANT_PORT)
-embedder = SentenceTransformer('all-MiniLM-L6-v2')
+
+# 嘗試使用多語言模型 (支援中文+英文)，若 Qdrant 已有資料是用 all-MiniLM-L6-v2 建的則自動降級
+EMBEDDER_MODEL = os.getenv("EMBEDDER_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
+try:
+    embedder = SentenceTransformer(EMBEDDER_MODEL)
+    print(f"===> Embedding 模型: {EMBEDDER_MODEL}", flush=True)
+except Exception as e:
+    print(f"===> 無法載入 {EMBEDDER_MODEL}，降級使用 all-MiniLM-L6-v2: {e}", flush=True)
+    embedder = SentenceTransformer('all-MiniLM-L6-v2')
+    EMBEDDER_MODEL = 'all-MiniLM-L6-v2'
 
 def load_feedback():
     """讀取使用者回饋以動態調整相關性門檻"""
@@ -38,7 +47,7 @@ def load_feedback():
                 return json.load(f)
     except Exception:
         pass
-    return {"score_threshold": 0.25, "thumbs_up": 0, "thumbs_down": 0}
+    return {"score_threshold": 0.10, "thumbs_up": 0, "thumbs_down": 0}
 
 def save_feedback(data):
     os.makedirs(os.path.dirname(FEEDBACK_FILE), exist_ok=True)
@@ -129,13 +138,13 @@ async def ask_database(request: QueryRequest):
         fb = load_feedback()
         score_threshold = fb.get("score_threshold", 0.25)
         
-        # 2. 跨多個 Table (Collection) 搜尋 (固定抓 15 筆候選)
+        # 2. 跨多個 Table (Collection) 搜尋 (每個表抓 30 筆候選以確保覆蓋率)
         for collection_name in target_collections:
             if qdrant.collection_exists(collection_name=collection_name):
                 res = qdrant.query_points(
                     collection_name=collection_name,
                     query=query_vector,
-                    limit=15
+                    limit=30
                 )
                 for point in res.points:
                     all_points.append((collection_name, point))
@@ -143,7 +152,7 @@ async def ask_database(request: QueryRequest):
         if not all_points:
             return {
                 "query": user_query,
-                "answer": "在目標的向量資料庫表 (`hedgedoc_notes`, `obsidian_notes`) 中找不到任何可用關聯資料，可能為空或尚未寫入。", 
+                "answer": "在目標的向量資料庫表中找不到任何可用關聯資料，可能為空或尚未寫入。", 
                 "source_documents": [],
                 "score_threshold": score_threshold
             }
@@ -151,13 +160,17 @@ async def ask_database(request: QueryRequest):
         # 混合兩個資料表，依據分數排序 (給 hedgedoc_notes 額外 5% 加權)
         all_points.sort(key=lambda x: x[1].score * (1.05 if x[0] == "hedgedoc_notes" else 1.0), reverse=True)
         
-        # 自動過濾：只保留分數高於動態門檻的結果，至少保留 2 筆、最多 request.top_k 筆
-        relevant_points = [(c, p) for c, p in all_points if p.score >= score_threshold]
-        if len(relevant_points) < 2:
-            relevant_points = all_points[:2]
-        candidate_points = relevant_points[:request.top_k * 3]
+        # 打印前 10 筆分數供除錯
+        print(f"==> Embedding模型: {EMBEDDER_MODEL} | 動態門檻: {score_threshold:.3f} | 原始候選: {len(all_points)}", flush=True)
+        for idx, (c, p) in enumerate(all_points[:10]):
+            title_debug, _, _ = extract_metadata_from_payload(p.payload, c)
+            print(f"    #{idx+1} [{c}] score={p.score:.4f} title={title_debug[:40]}", flush=True)
         
-        print(f"==> 動態門檻: {score_threshold:.3f}, 原始候選: {len(all_points)}, 過濾後: {len(relevant_points)}, 取用: {len(candidate_points)}", flush=True)
+        # 自動過濾：只保留分數高於動態門檻的結果，至少保留 3 筆
+        relevant_points = [(c, p) for c, p in all_points if p.score >= score_threshold]
+        if len(relevant_points) < 3:
+            relevant_points = all_points[:3]
+        candidate_points = relevant_points[:request.top_k * 3]
         
         # 簡單切出關鍵字尋找焦點
         keywords = [k for k in re.split(r'\W+', user_query) if len(k) >= 2]
@@ -188,19 +201,19 @@ async def ask_database(request: QueryRequest):
             if start_pos + 500 < len(text):
                 chunk = chunk + "..."
                 
-            # 過濾重複內容 (超過 60% 相似度即拋棄)
+            # 過濾重複內容 (超過 50% 相似度即拋棄)
             is_duplicate = False
             for exist_chunk in truncated_texts:
-                if difflib.SequenceMatcher(None, chunk[:200], exist_chunk[:200]).ratio() > 0.60:
+                if difflib.SequenceMatcher(None, chunk[:200], exist_chunk[:200]).ratio() > 0.50:
                     is_duplicate = True
                     break
             
             if is_duplicate:
                 continue
                 
-            # 總長度上限 3000 字
-            if total_length + len(chunk) > 3000:
-                allowed_len = max(0, 3000 - total_length)
+            # 總長度上限 4000 字
+            if total_length + len(chunk) > 4000:
+                allowed_len = max(0, 4000 - total_length)
                 if allowed_len > 30:
                     truncated_texts.append(chunk[:allowed_len] + "...")
                     final_best_points.append((coll, hit))
