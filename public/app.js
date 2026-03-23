@@ -1624,3 +1624,88 @@ async function exportRagToHedgedoc() {
 }
 
 
+// ─── Generate Social Post with APA Citations ─────────────────
+async function generateSocialPost() {
+    if (!window.lastRagData) {
+        showToast('請先執行查詢', 'error');
+        return;
+    }
+    
+    const btn = document.getElementById('btnRagSocialPost');
+    const oldText = btn.innerHTML;
+    const resultDiv = document.getElementById('ragSocialResult');
+    const contentDiv = document.getElementById('ragSocialContent');
+    
+    try {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;border-top-color:white;margin-right:6px;"></span> 生成中...';
+        
+        resultDiv.style.display = 'block';
+        contentDiv.innerHTML = '<p style="color:var(--text-muted); text-align:center; padding:20px;">✍️ Gemini 正在將回答重整為社群文章並加註 APA 引用格式...</p>';
+        
+        const res = await fetch(`${API}/api/rag/social-post`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                query: window.lastRagData.query,
+                answer: window.lastRagData.answer,
+                source_documents: window.lastRagData.source_documents
+            })
+        });
+        
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '生成失敗');
+        
+        window.lastSocialPost = data.content;
+        contentDiv.innerHTML = renderMarkdown(data.content);
+        showToast('✅ 社群文章生成完成！', 'success');
+        resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        
+    } catch (e) {
+        console.error('Social post error:', e);
+        contentDiv.innerHTML = `<p style="color:#ef4444; padding:12px;">❌ ${escapeHtml(e.message)}</p>`;
+        showToast(`生成失敗: ${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = oldText;
+    }
+}
+
+// ─── Copy Social Post to Clipboard ───────────────────────────
+function copySocialPost() {
+    if (!window.lastSocialPost) return;
+    navigator.clipboard.writeText(window.lastSocialPost).then(() => {
+        showToast('📋 已複製到剪貼簿！', 'success');
+    }).catch(() => {
+        showToast('複製失敗', 'error');
+    });
+}
+
+// ─── Export Social Post to HedgeDoc ──────────────────────────
+async function exportSocialToHedgedoc() {
+    if (!window.lastSocialPost) return;
+    
+    try {
+        const query = window.lastRagData?.query || '社群文章';
+        const mdContent = `###### tags: \`社群文章\` \`APA引用\` \`RAG生成\`\n\n${window.lastSocialPost}`;
+        
+        const saveRes = await fetch(`${API}/api/hedgedoc/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: mdContent,
+                title: `社群文章 - ${query.substring(0, 30)}`
+            })
+        });
+        
+        const saveData = await saveRes.json();
+        if (!saveData.success) throw new Error(saveData.error || '儲存失敗');
+        
+        showToast('✅ 社群文章已存至 HedgeDoc！', 'success');
+        if (saveData.note && saveData.note.url) {
+            window.open(saveData.note.url, '_blank');
+        }
+    } catch (e) {
+        showToast(`轉存失敗: ${e.message}`, 'error');
+    }
+}

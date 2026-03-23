@@ -377,8 +377,22 @@
             <button class="btn btn-success btn-sm btn-icon-text" id="btnRagToHedgedoc" style="margin-left:auto;" onclick="exportRagToHedgedoc()">
               📝 轉存為 HedgeDoc
             </button>
+            <button class="btn btn-sm btn-icon-text" id="btnRagSocialPost" style="background:linear-gradient(135deg,#8b5cf6,#ec4899); color:white; border:none;" onclick="generateSocialPost()">
+              ✍️ 社群文章
+            </button>
           </div>
           <div class="md-preview" id="ragAnswer" style="line-height: 1.8; font-size: 16px;"></div>
+          
+          <!-- Social Post Result -->
+          <div id="ragSocialResult" style="display:none; margin-top:16px; border:1px solid var(--border); border-radius:10px; overflow:hidden;">
+            <div style="padding:10px 14px; background:linear-gradient(135deg,#8b5cf622,#ec489922); display:flex; align-items:center; gap:8px;">
+              <span style="font-size:16px;">✍️</span>
+              <span style="font-weight:600; font-size:14px;">社群文章 (含 APA 引用)</span>
+              <button onclick="copySocialPost()" style="margin-left:auto; font-size:11px; padding:4px 10px; border:1px solid var(--border); border-radius:6px; background:transparent; cursor:pointer; color:var(--text-primary);">📋 複製全文</button>
+              <button onclick="exportSocialToHedgedoc()" style="font-size:11px; padding:4px 10px; border:1px solid #10b981; border-radius:6px; background:transparent; cursor:pointer; color:#10b981;">📝 存至 HedgeDoc</button>
+            </div>
+            <div id="ragSocialContent" class="md-preview" style="padding:14px; line-height:1.8; font-size:15px;"></div>
+          </div>
           
           <div style="margin-top: 24px;">
             <h4 style="font-size: 14px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">

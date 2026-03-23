@@ -1481,6 +1481,86 @@ app.post('/api/rag/export-to-hedgedoc', async (req, res) => {
   }
 });
 
+// ─── RAG: Generate Social Post with APA Citations ───────────
+app.post('/api/rag/social-post', async (req, res) => {
+  try {
+    const { query, answer, source_documents } = req.body;
+    const settings = getSettings();
+    
+    if (!settings.geminiApiKey) {
+      return res.status(400).json({ error: '需要 Gemini API Key 才能生成社群文章，請在設定中填寫' });
+    }
+
+    // Build source reference list for the prompt
+    let sourceList = '';
+    if (source_documents && source_documents.length > 0) {
+      source_documents.forEach((doc, i) => {
+        const title = doc.title || '未命名';
+        const url = doc.url || '';
+        const collection = doc.collection || '';
+        const sourcePath = doc.source_path || '';
+        const text = doc.text || '';
+        sourceList += `\n來源 ${i+1}:\n  標題: ${title}\n  URL: ${url}\n  資料庫: ${collection}\n  路徑: ${sourcePath}\n  摘錄: ${text}\n`;
+      });
+    }
+
+    const today = new Date().toISOString().split('T')[0];
+
+    const prompt = `你是一位專業的社群媒體內容編輯。請將以下 AI 回答改寫為一篇適合在社群媒體 (如 Facebook, LinkedIn, Medium, Threads) 上發表的知識型文章。
+
+## 嚴格要求：
+1. **文章風格**：語氣親和但專業、有觀點的知識型貼文。開頭要有吸引人的 hook（可用問句或金句）。
+2. **段落結構**：使用標題、重點條列、emoji 點綴，讓內容容易閱讀。
+3. **內文引用 (APA 格式)**：在文中適當位置以 APA 行內引用格式標注來源，例如 (作者, 年份) 或 (標題, ${today})。
+4. **References 段落**：文末必須附上完整的 APA 格式的 References 清單。格式範例：
+   - 網路文章：作者. (日期). *標題*. 網站名稱. URL
+   - 若無作者則以標題開頭
+   - 若無日期則用 (n.d.)
+5. **使用繁體中文**撰寫。
+6. **加入 hashtag**：文末加上 3-5 個相關的 hashtag。
+
+## 原始查詢問題：
+${query}
+
+## AI 原始回答：
+${answer}
+
+## 可引用的來源資料：
+${sourceList}
+
+## 今天日期：${today}
+
+請直接輸出完整的社群文章（含內文引用和 References）：`;
+
+    const geminiModel = settings.geminiModel || 'gemini-2.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${settings.geminiApiKey}`;
+    
+    const geminiRes = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.8, maxOutputTokens: 8192 }
+      })
+    });
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      throw new Error(`Gemini API 錯誤: ${geminiRes.status} - ${errText}`);
+    }
+
+    const geminiData = await geminiRes.json();
+    const socialPost = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    if (!socialPost) throw new Error('Gemini 未回傳內容');
+
+    res.json({ success: true, content: socialPost });
+  } catch (error) {
+    console.error('Social post generation error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ─── Fallback to SPA ─────────────────────────────────────────
 app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
