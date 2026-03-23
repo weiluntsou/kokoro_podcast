@@ -1491,33 +1491,83 @@ app.post('/api/rag/social-post', async (req, res) => {
       return res.status(400).json({ error: '需要 Gemini API Key 才能生成社群文章，請在設定中填寫' });
     }
 
-    // Build source reference list for the prompt
-    let sourceList = '';
+    // 過濾來源：只保留有原始外部連結的資料（排除 HedgeDoc/Obsidian 內部連結）
+    const validSources = [];
     if (source_documents && source_documents.length > 0) {
-      source_documents.forEach((doc, i) => {
-        const title = doc.title || '未命名';
-        const url = doc.url || '';
-        const collection = doc.collection || '';
-        const sourcePath = doc.source_path || '';
-        const text = doc.text || '';
-        sourceList += `\n來源 ${i+1}:\n  標題: ${title}\n  URL: ${url}\n  資料庫: ${collection}\n  路徑: ${sourcePath}\n  摘錄: ${text}\n`;
+      for (const doc of source_documents) {
+        const text = doc.text || doc.full_text || '';
+        const title = doc.title || '';
+        
+        // 嘗試從內容中提取原始來源連結（如 X/Twitter, YouTube, 網站等）
+        const urlMatches = text.match(/https?:\/\/(?!.*hedgedoc)(?!.*localhost)[^\s\]\)）」>]+/gi) || [];
+        // 也檢查 doc.url 是否為真正的外部連結（排除 HedgeDoc 內部網址）
+        let originalUrl = '';
+        if (doc.url && doc.url.startsWith('http') && !doc.url.includes('hedgedoc') && !doc.url.includes('localhost')) {
+          originalUrl = doc.url;
+        } else if (urlMatches.length > 0) {
+          originalUrl = urlMatches[0];
+        }
+        
+        // 嘗試提取作者名稱
+        let author = '';
+        const authorMatch = text.match(/@(\w+)/);
+        if (authorMatch) author = `@${authorMatch[1]}`;
+        
+        // 嘗試推斷來源平台
+        let platform = '';
+        if (originalUrl.includes('x.com') || originalUrl.includes('twitter.com')) platform = 'X (Twitter)';
+        else if (originalUrl.includes('youtube.com') || originalUrl.includes('youtu.be')) platform = 'YouTube';
+        else if (originalUrl.includes('medium.com')) platform = 'Medium';
+        else if (originalUrl) platform = new URL(originalUrl).hostname.replace('www.', '');
+        
+        if (originalUrl || author) {
+          validSources.push({
+            index: validSources.length + 1,
+            title: title,
+            author: author,
+            url: originalUrl,
+            platform: platform,
+            excerpt: text.substring(0, 300)
+          });
+        }
+      }
+    }
+
+    // 構建來源清單
+    let sourceList = '';
+    if (validSources.length > 0) {
+      validSources.forEach(s => {
+        sourceList += `\n來源 ${s.index}:\n  標題: ${s.title}\n  作者: ${s.author || '未知'}\n  平台: ${s.platform || '未知'}\n  原始連結: ${s.url}\n  摘錄: ${s.excerpt}\n`;
       });
+    } else {
+      sourceList = '\n（無可引用的外部原始來源）\n';
     }
 
     const today = new Date().toISOString().split('T')[0];
 
-    const prompt = `你是一位專業的社群媒體內容編輯。請將以下 AI 回答改寫為一篇適合在社群媒體 (如 Facebook, LinkedIn, Medium, Threads) 上發表的知識型文章。
+    const prompt = `你是一位專業的社群媒體內容編輯。請將以下 AI 回答改寫為一篇適合在 **Threads** 上發表的知識型串文。
 
 ## 嚴格要求：
-1. **文章風格**：語氣親和但專業、有觀點的知識型貼文。開頭要有吸引人的 hook（可用問句或金句）。
-2. **段落結構**：使用標題、重點條列、emoji 點綴，讓內容容易閱讀。
-3. **內文引用 (APA 格式)**：在文中適當位置以 APA 行內引用格式標注來源，例如 (作者, 年份) 或 (標題, ${today})。
-4. **References 段落**：文末必須附上完整的 APA 格式的 References 清單。格式範例：
-   - 網路文章：作者. (日期). *標題*. 網站名稱. URL
-   - 若無作者則以標題開頭
-   - 若無日期則用 (n.d.)
-5. **使用繁體中文**撰寫。
-6. **加入 hashtag**：文末加上 3-5 個相關的 hashtag。
+
+### 格式規則 — Threads 串文
+- 將文章切分為 **多個獨立段落**，每段用 \`---\` 分隔線隔開。
+- 每段代表 Threads 上的一則貼文（建議每段 150~300 字以內）。
+- **第 1 段**：以吸引人的 hook 開頭（問句或金句），點出主題。
+- **中間段落**：每段聚焦一個重點或觀點，使用 emoji 與條列式提升可讀性。
+- **結尾段**：總結 + 行動呼籲 (CTA) + hashtag。
+
+### APA 引用規則
+- **只引用有明確原始來源（作者、平台、URL）的資料**。
+- 在行文中以 APA 行內引用標注，例如：(@作者名, ${today}) 或 (標題, 平台, 日期)。
+- 文末的 **References** 段落必須使用 APA 格式，只列出有原始 URL 的來源：
+  - 格式：作者. (日期). *標題*. 平台. URL
+  - 若無作者：*標題*. (日期). 平台. URL
+- **禁止** 在 References 中出現 HedgeDoc、Obsidian、localhost 或任何內部筆記系統的連結。
+- 如果沒有任何可引用的外部來源，就省略 References 段落，不要編造。
+
+### 其他
+- 使用**繁體中文**撰寫。
+- 文末加上 3~5 個相關 hashtag。
 
 ## 原始查詢問題：
 ${query}
@@ -1525,17 +1575,17 @@ ${query}
 ## AI 原始回答：
 ${answer}
 
-## 可引用的來源資料：
+## 可引用的原始來源資料（僅限以下清單）：
 ${sourceList}
 
 ## 今天日期：${today}
 
-請直接輸出完整的社群文章（含內文引用和 References）：`;
+請直接輸出完整的 Threads 串文（每段用 --- 分隔，最後附 References 和 hashtag）：`;
 
     const geminiModel = settings.geminiModel || 'gemini-2.5-flash';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${settings.geminiApiKey}`;
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${settings.geminiApiKey}`;
     
-    const geminiRes = await fetch(url, {
+    const geminiRes = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1554,7 +1604,7 @@ ${sourceList}
     
     if (!socialPost) throw new Error('Gemini 未回傳內容');
 
-    res.json({ success: true, content: socialPost });
+    res.json({ success: true, content: socialPost, valid_sources: validSources.length });
   } catch (error) {
     console.error('Social post generation error:', error.message);
     res.status(500).json({ error: error.message });
