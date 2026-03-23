@@ -25,16 +25,37 @@ QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", 6333))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "my_knowledge_base")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "sorc/qwen3.5-instruct:0.8b")
+FEEDBACK_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'rag_feedback.json'))
 
 qdrant = QdrantClient(QDRANT_HOST, port=QDRANT_PORT)
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
 
+def load_feedback():
+    """讀取使用者回饋以動態調整相關性門檻"""
+    try:
+        if os.path.exists(FEEDBACK_FILE):
+            with open(FEEDBACK_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {"score_threshold": 0.25, "thumbs_up": 0, "thumbs_down": 0}
+
+def save_feedback(data):
+    os.makedirs(os.path.dirname(FEEDBACK_FILE), exist_ok=True)
+    with open(FEEDBACK_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
 class QueryRequest(BaseModel):
     query: str
-    top_k: int = 3
+    top_k: int = 10
     model: str = None
     gemini_api_key: str = None
     gemini_model: str = None
+
+class FeedbackRequest(BaseModel):
+    source_index: int
+    score: float
+    is_relevant: bool  # True = 👍, False = 👎
 
 def extract_text_from_payload(payload):
     """從 Qdrant payload 中智慧提取純文字內容"""
@@ -103,13 +124,17 @@ async def ask_database(request: QueryRequest):
         target_collections = ["hedgedoc_notes", "obsidian_notes"]
         all_points = []
         
-        # 2. 跨多個 Table (Collection) 搜尋
+        # 讀取動態門檻
+        fb = load_feedback()
+        score_threshold = fb.get("score_threshold", 0.25)
+        
+        # 2. 跨多個 Table (Collection) 搜尋 (固定抓 15 筆候選)
         for collection_name in target_collections:
             if qdrant.collection_exists(collection_name=collection_name):
                 res = qdrant.query_points(
                     collection_name=collection_name,
                     query=query_vector,
-                    limit=request.top_k
+                    limit=15
                 )
                 for point in res.points:
                     all_points.append((collection_name, point))
@@ -118,12 +143,20 @@ async def ask_database(request: QueryRequest):
             return {
                 "query": user_query,
                 "answer": "在目標的向量資料庫表 (`hedgedoc_notes`, `obsidian_notes`) 中找不到任何可用關聯資料，可能為空或尚未寫入。", 
-                "source_documents": []
+                "source_documents": [],
+                "score_threshold": score_threshold
             }
             
         # 混合兩個資料表，依據分數排序 (給 hedgedoc_notes 額外 5% 加權)
         all_points.sort(key=lambda x: x[1].score * (1.05 if x[0] == "hedgedoc_notes" else 1.0), reverse=True)
-        candidate_points = all_points[:request.top_k * 3]
+        
+        # 自動過濾：只保留分數高於動態門檻的結果，至少保留 2 筆、最多 request.top_k 筆
+        relevant_points = [(c, p) for c, p in all_points if p.score >= score_threshold]
+        if len(relevant_points) < 2:
+            relevant_points = all_points[:2]
+        candidate_points = relevant_points[:request.top_k * 3]
+        
+        print(f"==> 動態門檻: {score_threshold:.3f}, 原始候選: {len(all_points)}, 過濾後: {len(relevant_points)}, 取用: {len(candidate_points)}", flush=True)
         
         # 簡單切出關鍵字尋找焦點
         keywords = [k for k in re.split(r'\W+', user_query) if len(k) >= 2]
@@ -239,7 +272,9 @@ async def ask_database(request: QueryRequest):
                 "url": url if url else "",
                 "title": title,
                 "collection": coll,
-                "source_path": source_path
+                "source_path": source_path,
+                "score": round(hit.score, 4),
+                "full_text": extract_text_from_payload(hit.payload)
             })
 
         retrieved_texts = source_docs_formatted
@@ -290,11 +325,33 @@ async def ask_database(request: QueryRequest):
         return {
             "query": user_query,
             "answer": answer,
-            "source_documents": retrieved_texts
+            "source_documents": retrieved_texts,
+            "score_threshold": score_threshold,
+            "model_used": gemini_model if gemini_api_key else model_to_use
         }
     except Exception as e:
         print(f"Error: {e}")
         raise HTTPException(status_code=500, detail=f"處理過程中發生錯誤: {str(e)}")
+
+@app.post("/feedback")
+async def submit_feedback(request: FeedbackRequest):
+    """接收使用者對來源的 👍/👎 回饋，動態微調相關性門檻"""
+    fb = load_feedback()
+    
+    if request.is_relevant:
+        fb["thumbs_up"] = fb.get("thumbs_up", 0) + 1
+        # 使用者認為相關 → 門檻可以略降以收集更多相關結果
+        if request.score < fb["score_threshold"] and fb["score_threshold"] > 0.10:
+            fb["score_threshold"] = round(fb["score_threshold"] - 0.01, 3)
+    else:
+        fb["thumbs_down"] = fb.get("thumbs_down", 0) + 1
+        # 使用者認為不相關 → 門檻提高以排除低品質結果
+        if request.score >= fb["score_threshold"] * 0.8 and fb["score_threshold"] < 0.90:
+            fb["score_threshold"] = round(fb["score_threshold"] + 0.01, 3)
+    
+    save_feedback(fb)
+    print(f"==> 回饋更新: {"👍" if request.is_relevant else "👎"} score={request.score:.4f}, 新門檻={fb['score_threshold']:.3f}", flush=True)
+    return {"success": True, "new_threshold": fb["score_threshold"], "stats": fb}
 
 if __name__ == "__main__":
     import uvicorn

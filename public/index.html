@@ -337,7 +337,7 @@
       <div id="page-rag" class="page">
         <div class="page-header">
           <h1>🔍 知識庫查詢 (RAG)</h1>
-          <p>聯網查詢本機 Qdrant 向量資料庫，並由 Ollama 生成回答</p>
+          <p>聯網查詢本機 Qdrant 向量資料庫，自動篩選相關內容並由 AI 生成回答</p>
         </div>
 
         <!-- Query Input -->
@@ -346,7 +346,7 @@
             <div class="icon purple">🧩</div>
             <div>
               <h3>問題查詢</h3>
-              <p>輸入你的問題，系統將檢索知識庫並回答</p>
+              <p>輸入你的問題，系統將自動判斷相關性並檢索知識庫</p>
             </div>
           </div>
           <div class="input-row">
@@ -354,11 +354,6 @@
             <button class="btn btn-primary" id="btnRagQuery" onclick="askRag()">
               <span id="btnRagText">🚀 查詢</span>
             </button>
-          </div>
-          <div class="input-group mt-3">
-             <label>檢索數量 (top-k)</label>
-             <input type="range" id="ragTopK" min="1" max="10" value="3" step="1" oninput="this.nextElementSibling.value = this.value" style="width:200px">
-             <output style="margin-left: 10px; font-weight: bold;">3</output>
           </div>
         </div>
 

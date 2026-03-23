@@ -1357,20 +1357,13 @@ async function askRag() {
         return;
     }
 
-    const topK = parseInt(document.getElementById('ragTopK').value) || 3;
     const btn = document.getElementById('btnRagQuery');
     const btnText = document.getElementById('btnRagText');
     const resultCard = document.getElementById('ragResult');
     const answerDiv = document.getElementById('ragAnswer');
     const sourcesDiv = document.getElementById('ragSources');
 
-    // Get RAG URL from settings
-    const ragUrl = document.getElementById('settingRagUrl').value.trim() || 'http://localhost:8866';
-
     try {
-        const geminiKey = document.getElementById('settingGeminiKey').value.trim();
-        const activeModel = geminiKey ? (document.getElementById('settingGeminiModel').value || 'gemini-2.5-flash') : (document.getElementById('settingRagModel').value || 'sorc/qwen3.5-instruct:0.8b');
-
         btn.disabled = true;
         btnText.innerHTML = '<span class="spinner" style="width:14px;height:14px;border-width:2px;border-top-color:white;"></span> 查詢中...';
         
@@ -1378,7 +1371,7 @@ async function askRag() {
         if (!statusDiv) {
             statusDiv = document.createElement('div');
             statusDiv.id = 'ragMetaStatus';
-            statusDiv.style = "font-size: 13px; color: var(--text-muted); margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 6px; display: flex; align-items: center; justify-content: space-between;";
+            statusDiv.style = "font-size: 13px; color: var(--text-muted); margin-bottom: 12px; padding: 10px; background: rgba(0,0,0,0.1); border-radius: 6px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px;";
             answerDiv.parentNode.insertBefore(statusDiv, answerDiv);
         }
         
@@ -1394,7 +1387,6 @@ async function askRag() {
             else if (elapsed >= 2.0) stage = '🧠 等候 LLM 生成解答...';
             
             statusDiv.innerHTML = `
-                <span><b>🧠 模型:</b> ${escapeHtml(activeModel)}</span>
                 <span><b>🔄 階段:</b> <span style="color:var(--accent-info)">${stage}</span></span>
                 <span><b>⏳ 耗時:</b> ${elapsed}s</span>
             `;
@@ -1403,7 +1395,7 @@ async function askRag() {
         const res = await fetch(`${API}/api/rag/ask`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, top_k: topK })
+            body: JSON.stringify({ query, top_k: 10 })
         });
 
         if (!res.ok) {
@@ -1413,7 +1405,6 @@ async function askRag() {
                 const errJson = JSON.parse(errText);
                 errorText = errJson.detail || errJson.error || errText;
             } catch (e) {
-                // If not JSON, use the raw text or fallback
                 errorText = errText || '查詢失敗';
             }
             throw new Error(errorText);
@@ -1423,21 +1414,23 @@ async function askRag() {
         
         if (window.ragTimerInterval) clearInterval(window.ragTimerInterval);
         const finalTime = ((Date.now() - startTime) / 1000).toFixed(1);
-        statusDiv = document.getElementById('ragMetaStatus');
-        if (statusDiv) {
-            statusDiv.innerHTML = `
-                <span><b>🧠 模型:</b> ${escapeHtml(activeModel)}</span>
-                <span><b>✅ 階段:</b> <span style="color:#10b981">處理完成</span></span>
-                <span><b>⏳ 總耗時:</b> ${finalTime}s</span>
-            `;
-        }
+        const modelUsed = data.model_used || '未知';
+        const threshold = data.score_threshold ? data.score_threshold.toFixed(3) : '0.250';
+        const docCount = data.source_documents ? data.source_documents.length : 0;
+        
+        statusDiv.innerHTML = `
+            <span><b>🧠 模型:</b> ${escapeHtml(modelUsed)}</span>
+            <span><b>✅ 階段:</b> <span style="color:#10b981">處理完成</span></span>
+            <span><b>📊 來源:</b> ${docCount} 筆 (門檻 ${threshold})</span>
+            <span><b>⏳ 總耗時:</b> ${finalTime}s</span>
+        `;
         
         // Show result
         window.lastRagData = { query, answer: data.answer, source_documents: data.source_documents };
         resultCard.style.display = 'block';
         answerDiv.innerHTML = renderMarkdown(data.answer);
         
-        // Show sources
+        // Show sources with thumbs up/down and export buttons
         if (data.source_documents && data.source_documents.length > 0) {
             sourcesDiv.innerHTML = data.source_documents.map((doc, i) => {
                 const text = typeof doc === 'object' && doc.text ? doc.text : doc;
@@ -1445,24 +1438,41 @@ async function askRag() {
                 const url = typeof doc === 'object' && doc.url ? doc.url : '';
                 const coll = typeof doc === 'object' && doc.collection ? doc.collection : '';
                 const sourcePath = typeof doc === 'object' && doc.source_path ? doc.source_path : '';
+                const score = typeof doc === 'object' && doc.score ? doc.score : 0;
                 
                 const collColor = coll === 'hedgedoc_notes' ? '#10b981' : '#8b5cf6';
                 const collIcon = coll === 'hedgedoc_notes' ? '📝' : '📓';
-                const collBadge = coll ? `<span style="background:${collColor}22; color:${collColor}; padding:2px 8px; border-radius:12px; font-size:10px; border:1px solid ${collColor}44; margin-left:6px;">${collIcon} ${escapeHtml(coll)}</span>` : '';
-                const titleHtml = title ? `<span style="font-weight:600; font-size:13px; color:var(--text-primary); margin-left:6px;">${escapeHtml(title)}</span>` : '';
-                const linkHtml = url && url.startsWith('http') ? `<a href="${escapeHtml(url)}" target="_blank" style="margin-left:auto; color:var(--accent-info); font-size:12px; text-decoration:none; white-space:nowrap;">🔗 開啟來源</a>` : '';
+                const collBadge = coll ? `<span style="background:${collColor}22; color:${collColor}; padding:2px 8px; border-radius:12px; font-size:10px; border:1px solid ${collColor}44;">${collIcon} ${escapeHtml(coll)}</span>` : '';
+                const titleHtml = title ? `<span style="font-weight:600; font-size:13px; color:var(--text-primary);">${escapeHtml(title)}</span>` : '';
+                const scoreBadge = `<span style="font-size:10px; color:var(--text-muted); padding:2px 6px; border-radius:8px; background:rgba(0,0,0,0.06);">🎯 ${score.toFixed(4)}</span>`;
+                
+                // Link button: HedgeDoc sources get direct link, Obsidian sources get export button
+                let actionBtns = '';
+                if (url && url.startsWith('http')) {
+                    actionBtns += `<a href="${escapeHtml(url)}" target="_blank" style="color:var(--accent-info); font-size:11px; text-decoration:none; padding:3px 8px; border:1px solid var(--accent-info); border-radius:6px; white-space:nowrap;">🔗 開啟</a>`;
+                }
+                if (coll === 'obsidian_notes') {
+                    actionBtns += `<button onclick="ragExportObsidian(${i})" style="color:#10b981; font-size:11px; padding:3px 8px; border:1px solid #10b981; border-radius:6px; background:transparent; cursor:pointer; white-space:nowrap;">📤 轉入 HedgeDoc</button>`;
+                }
+                
                 const pathHtml = sourcePath ? `<div style="font-size:11px; color:var(--text-muted); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📂 ${escapeHtml(sourcePath)}</div>` : '';
 
                 return `
-                <div style="background:var(--bg-card-hover); border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:10px;">
-                    <div style="display:flex; align-items:center; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
+                <div style="background:var(--bg-card-hover); border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:10px;" id="ragSource-${i}">
+                    <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:4px;">
                         <span style="font-size:12px; font-weight:600; color:var(--accent-primary);">[來源 ${i+1}]</span>
-                        ${collBadge}
-                        ${titleHtml}
-                        ${linkHtml}
+                        ${collBadge} ${scoreBadge} ${titleHtml}
+                        <div style="margin-left:auto; display:flex; gap:4px; align-items:center;">
+                            ${actionBtns}
+                        </div>
                     </div>
                     ${pathHtml}
                     <div style="font-size:14px; color:var(--text-primary); white-space:pre-wrap; line-height:1.6; margin-top:8px; padding:8px; background:rgba(0,0,0,0.05); border-radius:6px; border-left:3px solid ${collColor};">${escapeHtml(text)}</div>
+                    <div style="display:flex; gap:8px; margin-top:8px; align-items:center;">
+                        <button onclick="ragFeedback(${i}, ${score}, true)" id="ragThumbUp-${i}" style="font-size:16px; padding:2px 10px; border:1px solid var(--border); border-radius:6px; background:transparent; cursor:pointer;" title="這個來源有幫助">👍</button>
+                        <button onclick="ragFeedback(${i}, ${score}, false)" id="ragThumbDown-${i}" style="font-size:16px; padding:2px 10px; border:1px solid var(--border); border-radius:6px; background:transparent; cursor:pointer;" title="這個來源不相關">👎</button>
+                        <span id="ragFbLabel-${i}" style="font-size:11px; color:var(--text-muted);"></span>
+                    </div>
                 </div>
             `;
             }).join('');
@@ -1471,8 +1481,6 @@ async function askRag() {
         }
 
         showToast('查詢完成', 'success');
-        
-        // Scroll to result
         resultCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 
     } catch (e) {
@@ -1482,6 +1490,65 @@ async function askRag() {
     } finally {
         btn.disabled = false;
         btnText.innerText = '🚀 查詢';
+    }
+}
+
+// ─── RAG Feedback (thumbs up/down) ───────────────────────────
+async function ragFeedback(index, score, isRelevant) {
+    const upBtn = document.getElementById(`ragThumbUp-${index}`);
+    const downBtn = document.getElementById(`ragThumbDown-${index}`);
+    const label = document.getElementById(`ragFbLabel-${index}`);
+    
+    upBtn.disabled = true;
+    downBtn.disabled = true;
+    
+    if (isRelevant) {
+        upBtn.style.background = '#10b98133';
+        upBtn.style.borderColor = '#10b981';
+    } else {
+        downBtn.style.background = '#ef444433';
+        downBtn.style.borderColor = '#ef4444';
+    }
+    
+    try {
+        const res = await fetch(`${API}/api/rag/feedback`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_index: index, score, is_relevant: isRelevant })
+        });
+        const data = await res.json();
+        label.innerText = `✓ 已記錄 (新門檻: ${data.new_threshold?.toFixed(3) || '—'})`;
+    } catch (e) {
+        label.innerText = '記錄失敗';
+    }
+}
+
+// ─── RAG: Export Obsidian source to HedgeDoc ─────────────────
+async function ragExportObsidian(index) {
+    if (!window.lastRagData || !window.lastRagData.source_documents) return;
+    const doc = window.lastRagData.source_documents[index];
+    if (!doc) return;
+    
+    try {
+        showToast('正在轉入 HedgeDoc...', 'info');
+        const res = await fetch(`${API}/api/rag/export-to-hedgedoc`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                title: doc.title || '未命名 Obsidian 筆記',
+                text: doc.full_text || doc.text || '',
+                source_path: doc.source_path || ''
+            })
+        });
+        const data = await res.json();
+        if (data.success && data.noteUrl) {
+            showToast('✅ 已轉入 HedgeDoc！', 'success');
+            window.open(data.noteUrl, '_blank');
+        } else {
+            throw new Error(data.error || '轉入失敗');
+        }
+    } catch (e) {
+        showToast(`轉入失敗: ${e.message}`, 'error');
     }
 }
 

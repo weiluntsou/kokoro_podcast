@@ -1426,6 +1426,60 @@ app.post('/api/rag/ask', async (req, res) => {
   }
 });
 
+// ─── RAG Feedback Proxy ─────────────────────────────────────
+app.post('/api/rag/feedback', async (req, res) => {
+  try {
+    const settings = getSettings();
+    const ragBaseUrl = (settings.ragUrl || 'http://localhost:8866').replace(/\/$/, '');
+    const ragRes = await fetch(`${ragBaseUrl}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+    const data = await ragRes.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── RAG: Export Obsidian content to HedgeDoc ───────────────
+app.post('/api/rag/export-to-hedgedoc', async (req, res) => {
+  try {
+    const { title, text, source_path } = req.body;
+    const settings = getSettings();
+    if (!settings.hedgedocUrl) return res.status(400).json({ error: '請先設定 HedgeDoc URL' });
+
+    const mdContent = `###### tags: \`Obsidian匯入\` \`RAG來源\`\n# ${title || '未命名筆記'}\n\n> 📂 原始路徑：\`${source_path || '未知'}\`\n\n---\n\n${text || '（無內容）'}`;
+
+    const hdRes = await fetch(`${settings.hedgedocUrl}/new`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/markdown',
+        'Cookie': settings.hedgedocCookie || ''
+      },
+      body: mdContent,
+      redirect: 'manual'
+    });
+
+    let noteUrl = '';
+    if (hdRes.status === 302) {
+      noteUrl = hdRes.headers.get('location') || '';
+      if (noteUrl && !noteUrl.startsWith('http')) {
+        noteUrl = `${settings.hedgedocUrl}${noteUrl}`;
+      }
+    } else {
+      const responseText = await hdRes.text();
+      noteUrl = `${settings.hedgedocUrl}/${responseText.trim()}`;
+    }
+
+    res.json({ success: true, noteUrl });
+  } catch (error) {
+    console.error('Export to HedgeDoc error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ─── Fallback to SPA ─────────────────────────────────────────
 app.get('/{*splat}', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
