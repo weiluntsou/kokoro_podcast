@@ -1391,7 +1391,7 @@ app.delete('/api/podcast/:id', (req, res) => {
 // ─── Local RAG Query Proxy ───────────────────────────────────
 app.post('/api/rag/ask', async (req, res) => {
   try {
-    const { query, top_k } = req.body;
+    const { query, top_k, collections } = req.body;
     const settings = getSettings();
     const ragBaseUrl = (settings.ragUrl || 'http://localhost:8866').replace(/\/$/, '');
 
@@ -1400,7 +1400,8 @@ app.post('/api/rag/ask', async (req, res) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ 
         query, 
-        top_k: top_k || 3,
+        top_k: top_k || 10,
+        collections: collections || ["hedgedoc_notes", "obsidian_notes"],
         model: settings.ragModel,
         gemini_api_key: settings.geminiApiKey,
         gemini_model: settings.geminiModel

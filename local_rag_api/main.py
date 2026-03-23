@@ -48,6 +48,7 @@ def save_feedback(data):
 class QueryRequest(BaseModel):
     query: str
     top_k: int = 10
+    collections: list = ["hedgedoc_notes", "obsidian_notes"]
     model: str = None
     gemini_api_key: str = None
     gemini_model: str = None
@@ -120,8 +121,8 @@ async def ask_database(request: QueryRequest):
         # 1. 將使用者查詢轉換為向量
         query_vector = embedder.encode(user_query).tolist()
         
-        # 1.5 檢查各個知識庫集合
-        target_collections = ["hedgedoc_notes", "obsidian_notes"]
+        # 1.5 使用前端指定的知識庫集合
+        target_collections = request.collections or ["hedgedoc_notes", "obsidian_notes"]
         all_points = []
         
         # 讀取動態門檻

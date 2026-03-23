@@ -1392,10 +1392,21 @@ async function askRag() {
             `;
         }, 100);
 
+        // 讀取使用者勾選的搜尋範圍
+        const collections = [];
+        if (document.getElementById('ragCollHedgedoc')?.checked) collections.push('hedgedoc_notes');
+        if (document.getElementById('ragCollObsidian')?.checked) collections.push('obsidian_notes');
+        if (collections.length === 0) {
+            showToast('請至少勾選一個搜尋範圍', 'error');
+            btn.disabled = false;
+            btnText.innerText = '🚀 查詢';
+            return;
+        }
+
         const res = await fetch(`${API}/api/rag/ask`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ query, top_k: 10 })
+            body: JSON.stringify({ query, top_k: 10, collections })
         });
 
         if (!res.ok) {
