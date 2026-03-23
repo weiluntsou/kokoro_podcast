@@ -36,6 +36,61 @@ class QueryRequest(BaseModel):
     gemini_api_key: str = None
     gemini_model: str = None
 
+def extract_text_from_payload(payload):
+    """從 Qdrant payload 中智慧提取純文字內容"""
+    if not payload:
+        return ""
+    # 情況 1: Obsidian 式 payload，有 page_content 鍵
+    if "page_content" in payload:
+        return str(payload["page_content"])
+    # 情況 2: 直接的 text / content 鍵
+    if "text" in payload:
+        return str(payload["text"])
+    if "content" in payload:
+        return str(payload["content"])
+    # 情況 3: 嘗試將整個 payload 組合出來（排除 metadata 等非內容欄位）
+    parts = []
+    for k, v in payload.items():
+        if k not in ("metadata", "id", "vector", "score") and isinstance(v, str) and len(v) > 10:
+            parts.append(v)
+    if parts:
+        return "\n".join(parts)
+    return ""
+
+def extract_metadata_from_payload(payload, collection_name):
+    """從 payload 中提取 title / url / source 等 metadata"""
+    title = ""
+    url = ""
+    source_path = ""
+    
+    if not payload:
+        return title, url, source_path
+    
+    # 直接在頂層找
+    title = payload.get("title", "")
+    url = payload.get("url", "")
+    source_path = payload.get("source", payload.get("full_path", ""))
+    
+    # Obsidian 式: metadata 藏在子 dict 裡
+    meta = payload.get("metadata", {})
+    if isinstance(meta, dict):
+        if not title:
+            title = meta.get("Header 1", meta.get("Header 2", meta.get("title", "")))
+        if not url:
+            url = meta.get("url", meta.get("id", ""))
+        if not source_path:
+            source_path = meta.get("source", meta.get("full_path", ""))
+    
+    # 如果還是沒有 title，從 source_path 的檔名取
+    if not title and source_path:
+        basename = source_path.rsplit("/", 1)[-1] if "/" in source_path else source_path
+        title = basename.replace(".md", "").strip()
+    
+    if not title:
+        title = payload.get("id", "未命名參考資料")
+    
+    return title, url, source_path
+
 @app.post("/ask")
 async def ask_database(request: QueryRequest):
     user_query = request.query
@@ -56,7 +111,6 @@ async def ask_database(request: QueryRequest):
                     query=query_vector,
                     limit=request.top_k
                 )
-                # 記錄來源所在的資料表，以利後續決定優先權
                 for point in res.points:
                     all_points.append((collection_name, point))
 
@@ -67,12 +121,11 @@ async def ask_database(request: QueryRequest):
                 "source_documents": []
             }
             
-        # 混合兩個資料表，依據分數排序 (給 hedgedoc_notes 額外 5% 加權，但絕對不會完全忽略高分的 obsidian_notes)
+        # 混合兩個資料表，依據分數排序 (給 hedgedoc_notes 額外 5% 加權)
         all_points.sort(key=lambda x: x[1].score * (1.05 if x[0] == "hedgedoc_notes" else 1.0), reverse=True)
-        # 先多留幾筆避免被重複過濾演算法刪光
-        candidate_points = all_points[:request.top_k * 2]
+        candidate_points = all_points[:request.top_k * 3]
         
-        # 簡單切出關鍵字尋找焦點，若都沒有則只找原句
+        # 簡單切出關鍵字尋找焦點
         keywords = [k for k in re.split(r'\W+', user_query) if len(k) >= 2]
         if not keywords:
             keywords = [user_query]
@@ -82,9 +135,8 @@ async def ask_database(request: QueryRequest):
         total_length = 0
 
         for coll, hit in candidate_points:
-            p_text = hit.payload.get("text", hit.payload.get("content", str(hit.payload))) if hit.payload else ""
-            text = str(p_text).strip()
-            if not text:
+            text = extract_text_from_payload(hit.payload)
+            if not text or len(text.strip()) < 15:
                 continue
                 
             # 尋找關鍵字的第一個匹配位置
@@ -92,31 +144,30 @@ async def ask_database(request: QueryRequest):
             for kw in keywords:
                 idx = text.find(kw)
                 if idx != -1:
-                    # 找到關鍵字，改為抓前後各 100 字 (總共 200 字)
-                    start_pos = max(0, idx - 100)
+                    start_pos = max(0, idx - 250)
                     break
             
-            # 從決定好的位置開始截取約 200 字
-            chunk = text[start_pos : start_pos + 200]
+            # 截取約 500 字的上下文視窗 (前後各 250 字)
+            chunk = text[start_pos : start_pos + 500]
             if start_pos > 0:
                 chunk = "..." + chunk
-            if start_pos + 200 < len(text):
+            if start_pos + 500 < len(text):
                 chunk = chunk + "..."
                 
-            # 利用 difflib 過濾「重複或過於相似」的內容片段 (大於 70% 相似就當作重複拋棄)
+            # 過濾重複內容 (超過 60% 相似度即拋棄)
             is_duplicate = False
             for exist_chunk in truncated_texts:
-                if difflib.SequenceMatcher(None, chunk, exist_chunk).ratio() > 0.70:
+                if difflib.SequenceMatcher(None, chunk[:200], exist_chunk[:200]).ratio() > 0.60:
                     is_duplicate = True
                     break
             
             if is_duplicate:
                 continue
                 
-            # 檢查總長度，不超過 1500 字
-            if total_length + len(chunk) > 1500:
-                allowed_len = max(0, 1500 - total_length)
-                if allowed_len > 10:
+            # 總長度上限 3000 字
+            if total_length + len(chunk) > 3000:
+                allowed_len = max(0, 3000 - total_length)
+                if allowed_len > 30:
                     truncated_texts.append(chunk[:allowed_len] + "...")
                     final_best_points.append((coll, hit))
                 break
@@ -125,11 +176,20 @@ async def ask_database(request: QueryRequest):
             final_best_points.append((coll, hit))
             total_length += len(chunk)
             
-            # 只要收集到足夠的獨特段落即可停止
             if len(truncated_texts) >= request.top_k:
                 break
 
-        context_text = "\n---\n".join([t for t in truncated_texts if t])
+        # 組合帶有編號的上下文給 LLM (讓 LLM 能引用來源編號)
+        context_parts = []
+        for i, chunk in enumerate(truncated_texts):
+            coll, hit = final_best_points[i]
+            title, _, source_path = extract_metadata_from_payload(hit.payload, coll)
+            label = f"[來源{i+1}] ({coll}) {title}"
+            if source_path:
+                label += f" | 路徑: {source_path}"
+            context_parts.append(f"{label}\n{chunk}")
+        
+        context_text = "\n\n---\n\n".join(context_parts)
 
         if not context_text.strip():
             return {
@@ -138,7 +198,7 @@ async def ask_database(request: QueryRequest):
                 "source_documents": []
             }
         
-        # 主動讀取 settings.json 來抓取 Gemini 金鑰與 Hedgedoc 網址，避免前臺 node.js 尚未重啟而沒收到參數的問題
+        # 主動讀取 settings.json 來抓取 Gemini 金鑰與 Hedgedoc 網址
         gemini_api_key = request.gemini_api_key
         gemini_model = request.gemini_model or "gemini-2.5-flash"
         hedgedoc_base = ""
@@ -155,32 +215,52 @@ async def ask_database(request: QueryRequest):
         except Exception:
             pass
 
-        # 重新打包給前端的詳細來源列表 (帶有連結和標題等 Metadata)
+        # 重新打包給前端的詳細來源列表
         source_docs_formatted = []
         for i, snippet in enumerate(truncated_texts):
             coll, hit = final_best_points[i]
             payload = hit.payload or {}
             
-            # 嘗試取得網址與標題
-            url = payload.get("url", payload.get("source", payload.get("id", "")))
+            title, raw_url, source_path = extract_metadata_from_payload(payload, coll)
             
-            # 若為 hedgedoc，自動依據伺服器設定補完完整網址
-            if coll == "hedgedoc_notes" and hedgedoc_base and url and not url.startswith("http"):
-                url = f"{hedgedoc_base}/{url}"
-                
-            title = payload.get("title", url if url else "未命名參考資料")
+            # 嘗試產生可用的連結 URL
+            url = raw_url
+            if coll == "hedgedoc_notes" and hedgedoc_base:
+                if url and not url.startswith("http"):
+                    url = f"{hedgedoc_base}/{url}"
+                elif not url:
+                    # 嘗試從 payload 的 id 組成
+                    doc_id = payload.get("id", payload.get("metadata", {}).get("id", ""))
+                    if doc_id:
+                        url = f"{hedgedoc_base}/{doc_id}"
             
             source_docs_formatted.append({
                 "text": snippet,
-                "url": url,
+                "url": url if url else "",
                 "title": title,
-                "collection": coll
+                "collection": coll,
+                "source_path": source_path
             })
 
         retrieved_texts = source_docs_formatted
 
-        # 4. 構建 Prompt 並調用 Ollama 或 Gemini
-        prompt = f"你是一個專業且精準的助手。請「僅根據以下提供的參考資料」來回答使用者的問題。\n如果參考資料中無法回答該問題，請誠實地說你不知道。\n\n[參考資料開始]\n{context_text}\n[參考資料結束]\n\n使用者問題：{user_query}\n\n請提供你的回答："
+        # 4. 構建更好的 Prompt
+        prompt = f"""你是一位知識淵博的研究助手。你的任務是根據以下提供的參考資料，為使用者的問題提供「全面、深入、有條理」的回答。
+
+## 回答規則：
+1. **盡量引用來源**：在回答時，請使用 [來源1]、[來源2] 等標記註明你引用了哪份參考資料。
+2. **綜合整理**：將不同來源的相關資訊融合在一起，整理成有條理的段落或清單。
+3. **豐富回答**：不要只是簡單複述原文，請加以歸納、提煉重點、分類整理。
+4. **延伸思考**：如果參考資料中的內容可以間接回答問題（例如相關主題、類似概念），也請一併整理出來。
+5. **不要捏造**：只根據參考資料回答，但要盡量從中挖掘出有用的資訊。
+6. **使用繁體中文** 回答。
+
+## 參考資料：
+{context_text}
+
+## 使用者問題：{user_query}
+
+請提供你的完整回答："""
 
         answer = ""
         if gemini_api_key:

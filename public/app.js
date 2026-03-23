@@ -1441,19 +1441,28 @@ async function askRag() {
         if (data.source_documents && data.source_documents.length > 0) {
             sourcesDiv.innerHTML = data.source_documents.map((doc, i) => {
                 const text = typeof doc === 'object' && doc.text ? doc.text : doc;
-                const titleHtml = typeof doc === 'object' && doc.title ? `<span style="font-weight:600; font-size:13px; color:var(--text-primary); margin-left:6px;">${escapeHtml(doc.title)}</span>` : '';
-                const linkHtml = typeof doc === 'object' && doc.url && doc.url.startsWith('http') ? `<a href="${escapeHtml(doc.url)}" target="_blank" style="margin-left:auto; color:var(--accent-info); font-size:12px; text-decoration:none;">🔗 開啟來源</a>` : '';
-                const collBadge = typeof doc === 'object' && doc.collection ? `<span style="background:var(--bg-card); padding:2px 8px; border-radius:12px; font-size:10px; border:1px solid var(--border); margin-left:6px;">${escapeHtml(doc.collection)}</span>` : '';
+                const title = typeof doc === 'object' && doc.title ? doc.title : '';
+                const url = typeof doc === 'object' && doc.url ? doc.url : '';
+                const coll = typeof doc === 'object' && doc.collection ? doc.collection : '';
+                const sourcePath = typeof doc === 'object' && doc.source_path ? doc.source_path : '';
+                
+                const collColor = coll === 'hedgedoc_notes' ? '#10b981' : '#8b5cf6';
+                const collIcon = coll === 'hedgedoc_notes' ? '📝' : '📓';
+                const collBadge = coll ? `<span style="background:${collColor}22; color:${collColor}; padding:2px 8px; border-radius:12px; font-size:10px; border:1px solid ${collColor}44; margin-left:6px;">${collIcon} ${escapeHtml(coll)}</span>` : '';
+                const titleHtml = title ? `<span style="font-weight:600; font-size:13px; color:var(--text-primary); margin-left:6px;">${escapeHtml(title)}</span>` : '';
+                const linkHtml = url && url.startsWith('http') ? `<a href="${escapeHtml(url)}" target="_blank" style="margin-left:auto; color:var(--accent-info); font-size:12px; text-decoration:none; white-space:nowrap;">🔗 開啟來源</a>` : '';
+                const pathHtml = sourcePath ? `<div style="font-size:11px; color:var(--text-muted); margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">📂 ${escapeHtml(sourcePath)}</div>` : '';
 
                 return `
                 <div style="background:var(--bg-card-hover); border:1px solid var(--border); border-radius:8px; padding:12px; margin-top:10px;">
-                    <div style="display:flex; align-items:center; margin-bottom:6px; flex-wrap:wrap;">
+                    <div style="display:flex; align-items:center; margin-bottom:4px; flex-wrap:wrap; gap:4px;">
                         <span style="font-size:12px; font-weight:600; color:var(--accent-primary);">[來源 ${i+1}]</span>
                         ${collBadge}
                         ${titleHtml}
                         ${linkHtml}
                     </div>
-                    <div style="font-size:14px; color:var(--text-primary); white-space:pre-wrap; line-height: 1.6;">${escapeHtml(text)}</div>
+                    ${pathHtml}
+                    <div style="font-size:14px; color:var(--text-primary); white-space:pre-wrap; line-height:1.6; margin-top:8px; padding:8px; background:rgba(0,0,0,0.05); border-radius:6px; border-left:3px solid ${collColor};">${escapeHtml(text)}</div>
                 </div>
             `;
             }).join('');
