@@ -51,6 +51,259 @@ function getSettings() {
   });
 }
 
+// ─── Background Task Manager ─────────────────────────────────
+const TASK_QUEUE_FILE = path.join(DATA_DIR, 'task_queue.json');
+let taskQueue = loadJSON(TASK_QUEUE_FILE, []);
+let isProcessingServerTasks = false;
+
+function saveTaskQueue() {
+  saveJSON(TASK_QUEUE_FILE, taskQueue);
+}
+
+function updateServerTask(taskId, progress) {
+  const task = taskQueue.find(t => t.id === taskId);
+  if (task) {
+    task.progress = progress;
+    saveTaskQueue();
+  }
+}
+
+async function internalFetch(urlPath, body, method = 'POST') {
+  const url = `http://localhost:${PORT}${urlPath}`;
+  const options = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body && ['POST', 'PUT', 'PATCH'].includes(method)) {
+    options.body = JSON.stringify(body);
+  }
+  const res = await fetch(url, options);
+  const data = await res.json();
+  if (!res.ok || (!data.success && data.success !== undefined)) {
+    throw new Error(data.error || data.detail || 'Internal request failed');
+  }
+  return data;
+}
+
+function formatOriginalText(text) {
+  if (!text) return '';
+  return text.replace(/https?:\/\/(t\.co|x\.com|twitter\.com)\/\S+/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim().split('\n').map(l => l.trim() ? `> ${l.trim()}` : '>').join('\n');
+}
+
+async function processPostWorker(task) {
+  const { url } = task.data;
+  updateServerTask(task.id, '解析貼文中...');
+  const parseData = await internalFetch('/api/x/parse', { url });
+  const currentTweet = parseData.tweet;
+
+  let contentForNote = currentTweet.text;
+  if (currentTweet.fetchedContent) {
+    contentForNote += `\n\n連結頁面內容：\n${currentTweet.fetchedContent}`;
+  }
+
+  let currentVideoPath = null;
+  if (currentTweet.hasVideo) {
+    updateServerTask(task.id, '下載影片中...');
+    const dlData = await internalFetch('/api/x/download-video', { url });
+    currentVideoPath = dlData.path;
+
+    updateServerTask(task.id, '語音轉逐字稿中...');
+    const trData = await internalFetch('/api/whisper/transcribe', { videoPath: dlData.filename });
+    if (trData.text) {
+      contentForNote = `貼文內容：\n${currentTweet.text}\n\n影片逐字稿：\n${trData.text}`;
+    }
+  }
+
+  updateServerTask(task.id, '生成中文筆記中...');
+  const noteData = await internalFetch('/api/gemini/summarize', { content: contentForNote });
+
+  const authorInfo = currentTweet.author ? `- **推文作者：** @${currentTweet.author}\n` : '';
+  const formattedOriginalText = formatOriginalText(currentTweet.text);
+  const originalTextInfo = formattedOriginalText ? `\n**原始貼文內容：**\n\n${formattedOriginalText}` : '';
+  const transcriptInfo = (currentTweet.hasVideo && currentVideoPath && contentForNote.includes('影片逐字稿：\n')) ? `\n\n**影片逐字稿：**\n\n${contentForNote.split('影片逐字稿：\n')[1] || ''}` : '';
+  const finalNoteContent = `${noteData.text}\n\n---\n\n### 原始來源與內容\n\n- **來源連結：** ${url}\n${authorInfo}${originalTextInfo}${transcriptInfo}`;
+
+  updateServerTask(task.id, '儲存至 HedgeDoc...');
+  const noteTitle = currentTweet.articleTitle || `X 貼文筆記 - @${currentTweet.author || 'unknown'} - ${new Date().toLocaleDateString('zh-TW')}`;
+  await internalFetch('/api/hedgedoc/create', { content: finalNoteContent, title: noteTitle, sourceUrl: url });
+}
+
+async function downloadVideoWorker(task) {
+  const { url } = task.data;
+  updateServerTask(task.id, '下載影片中...');
+  await internalFetch('/api/x/download-video', { url });
+}
+
+async function processVideoNoteWorker(task) {
+  const { filename, url } = task.data;
+  updateServerTask(task.id, '語音轉逐字稿中...');
+  const trData = await internalFetch('/api/whisper/transcribe', { videoPath: filename });
+  const contentForNote = `來源連結：${url}\n\n影片逐字稿：\n${trData.text}`;
+  
+  updateServerTask(task.id, '生成中文筆記中...');
+  const noteData = await internalFetch('/api/gemini/summarize', { content: contentForNote });
+  
+  const titleMatch = noteData.text.match(/^#\s+(.+)$/m);
+  let generatedTitle = `影片逐字稿筆記 - ${new Date().toLocaleDateString('zh-TW')}`;
+  if (titleMatch && titleMatch[1]) {
+    generatedTitle = titleMatch[1].replace(/\*\*/g, '').replace(/__/g, '').trim(); 
+  }
+  const finalNoteContent = `${noteData.text}\n\n---\n\n### 原始來源與逐字稿\n\n- **來源連結：** ${url}\n\n**影片完整逐字稿：**\n\n${trData.text}`;
+
+  updateServerTask(task.id, '重新命名影片檔案...');
+  try {
+    await internalFetch('/api/videos/rename', { oldFilename: filename, newTitle: generatedTitle });
+  } catch (e) {
+    console.error('Task: Failed to rename video:', e.message);
+  }
+  
+  updateServerTask(task.id, '儲存至 HedgeDoc...');
+  await internalFetch('/api/hedgedoc/create', { content: finalNoteContent, title: generatedTitle, sourceUrl: url });
+}
+
+async function processPodcastWorker(task) {
+  const { noteIds, title, language } = task.data;
+  updateServerTask(task.id, '讀取 Hedgehog 筆記中...');
+  const notesRes = await internalFetch('/api/hedgedoc/list', null, 'GET');
+  const selectedNotes = notesRes.notes.filter(n => noteIds.includes(n.id));
+
+  let combinedContent = '';
+  let combinedTitle = '';
+  const settings = getSettings();
+  
+  for (const note of selectedNotes) {
+    combinedTitle += (combinedTitle ? ' & ' : '') + note.title;
+    try {
+      const noteId = note.url.split('/').pop();
+      const contentRes = await fetch(`${settings.hedgedocUrl}/${noteId}/download`, {
+        headers: { 'Cookie': settings.hedgedocCookie || '' }
+      });
+      if (contentRes.ok) {
+        const content = await contentRes.text();
+        combinedContent += `\n\n--- ${note.title} ---\n${content}`;
+      } else {
+        combinedContent += `\n\n--- ${note.title} ---\n（標題：${note.title}）`;
+      }
+    } catch {
+      combinedContent += `\n\n--- ${note.title} ---\n（標題：${note.title}）`;
+    }
+  }
+
+  const minutes = combinedContent.length > 2000 ? 12 : 5;
+  updateServerTask(task.id, `📍 正在用 Gemini 生成 ${minutes} 分鐘講稿...`);
+  const scriptData = await internalFetch('/api/podcast/generate-script', { 
+    noteContents: combinedContent, noteTitle: combinedTitle || title, language, minutes 
+  });
+  
+  updateServerTask(task.id, '📍 正在發送講稿到 Kokoro 生成語音...');
+  const audioData = await internalFetch('/api/podcast/generate-audio', {
+    script: scriptData.script, title: `🎙️ ${combinedTitle || title}`, language
+  });
+  
+  const taskId = audioData.taskId;
+  updateServerTask(task.id, `Kokoro 語音生成中... (Task: ${taskId.substring(0, 8)}...)`);
+  
+  const maxWait = 7200;
+  const interval = 5;
+  let elapsed = 0;
+  while (elapsed < maxWait) {
+    await new Promise(r => setTimeout(r, interval * 1000));
+    elapsed += interval;
+    try {
+      const statusData = await internalFetch(`/api/podcast/task-status/${taskId}`, null, 'GET');
+      if (statusData.status === 'completed') {
+        return;
+      } else if (statusData.status === 'error' || statusData.status === 'failed') {
+        throw new Error('語音生成任務失敗');
+      } else {
+        const progress_percent = Math.round(statusData.progress_percent || statusData.progress || 0);
+        const current_step = statusData.current_step || statusData.step || 0;
+        const total_steps = statusData.total_steps || 0;
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
+        updateServerTask(task.id, `任務生成中... ${timeStr}<br>進度：${progress_percent}% (${current_step}/${total_steps})`);
+      }
+    } catch(e) {
+      if (e.message.indexOf('失敗') > -1) throw e;
+    }
+  }
+  throw new Error('語音生成超時（超過 2 小時）');
+}
+
+async function processServerNextTask() {
+  if (isProcessingServerTasks) return;
+  const pendingTaskIndex = taskQueue.findIndex(t => t.status === 'pending');
+  if (pendingTaskIndex === -1) return;
+
+  isProcessingServerTasks = true;
+  const task = taskQueue[pendingTaskIndex];
+  task.status = 'processing';
+  saveTaskQueue();
+
+  try {
+    if (task.type === 'process') {
+      await processPostWorker(task);
+    } else if (task.type === 'podcast') {
+      await processPodcastWorker(task);
+    } else if (task.type === 'download' || task.type === 'direct-download') {
+      await downloadVideoWorker(task);
+    } else if (task.type === 'video-note') {
+      await processVideoNoteWorker(task);
+    }
+    task.status = 'done';
+    task.progress = '處理完成';
+  } catch (err) {
+    task.status = 'error';
+    task.progress = `錯誤: ${err.message}`;
+  }
+  
+  saveTaskQueue();
+  isProcessingServerTasks = false;
+  processServerNextTask();
+}
+
+// Reset processing tasks on boot
+(() => {
+  taskQueue.forEach(t => {
+    if (t.status === 'processing') {
+      t.status = 'error';
+      t.progress = '處理中斷 (伺服器重新啟動)';
+    }
+  });
+  saveTaskQueue();
+  setTimeout(() => processServerNextTask(), 3000);
+})();
+
+app.get('/api/tasks', (req, res) => {
+  res.json({ success: true, queue: taskQueue });
+});
+
+app.post('/api/tasks/add', (req, res) => {
+  const task = {
+    id: Date.now().toString() + Math.floor(Math.random() * 1000),
+    type: req.body.type,
+    name: req.body.name,
+    status: 'pending',
+    progress: '排隊中...',
+    data: req.body.data,
+    createdAt: new Date().toISOString()
+  };
+  taskQueue.push(task);
+  saveTaskQueue();
+  processServerNextTask();
+  res.json({ success: true, task });
+});
+
+app.post('/api/tasks/clear', (req, res) => {
+  taskQueue = taskQueue.filter(t => t.status === 'pending' || t.status === 'processing');
+  saveTaskQueue();
+  res.json({ success: true });
+});
+
 // ─── Settings API ────────────────────────────────────────────
 function convertCookieToNetscape(cookieString, domain = '.x.com') {
   if (!cookieString) return '';

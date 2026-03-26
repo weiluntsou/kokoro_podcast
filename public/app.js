@@ -171,138 +171,73 @@ async function saveSettings() {
 // ─── Task Queue ───────────────────────────────────────
 const TaskQueue = {
     queue: [],
-    isProcessing: false,
-    taskIdCounter: 0,
 
-    addProcessTask(url) {
+    async fetchQueue() {
+        try {
+            const res = await fetch(`${API}/api/tasks`);
+            const data = await res.json();
+            if (data.success) {
+                const oldQueue = this.queue || [];
+                this.queue = data.queue;
+                this.render();
+                
+                // Refresh lists if any task finished
+                let hasNewlyDone = false;
+                for (const t of this.queue) {
+                    const oldT = oldQueue.find(o => o.id === t.id);
+                    if (t.status === 'done' && (!oldT || oldT.status !== 'done')) {
+                        hasNewlyDone = true;
+                    }
+                }
+                if (hasNewlyDone) {
+                    if (typeof loadNotesList === 'function') loadNotesList();
+                    if (typeof loadPodcastList === 'function') loadPodcastList();
+                    if (typeof loadVideosList === 'function') loadVideosList();
+                }
+            }
+        } catch(e) {}
+    },
+
+    async addProcessTask(url) {
         if (!url) return;
-        const task = {
-            id: ++this.taskIdCounter,
-            type: 'process',
-            name: `處理貼文...`,
-            status: 'pending',
-            progress: '排隊中...',
-            data: { url }
-        };
-        this.queue.push(task);
-        this.render();
-        this.processNext();
+        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'process', name: '處理貼文...', data: {url}}) });
+        this.fetchQueue();
         showToast('已加入處理佇列', 'success');
     },
 
-    addPodcastTask(noteIdsArray, notesData, title, language = 'zh') {
-        const task = {
-            id: ++this.taskIdCounter,
-            type: 'podcast',
-            name: `Podcast: ${title.substring(0, 20)}...`,
-            status: 'pending',
-            progress: '排隊中...',
-            data: { noteIds: noteIdsArray, notesData, title, language }
-        };
-        this.queue.push(task);
-        this.render();
-        this.processNext();
+    async addPodcastTask(noteIdsArray, notesData, title, language = 'zh') {
+        const name = `Podcast: ${title.substring(0, 20)}...`;
+        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'podcast', name, data: {noteIds: noteIdsArray, title, language}}) });
+        this.fetchQueue();
         showToast('已加入 Podcast 佇列', 'success');
     },
 
-    addDownloadTask(url) {
+    async addDownloadTask(url) {
         if (!url) return;
-        const task = {
-            id: ++this.taskIdCounter,
-            type: 'download',
-            name: `下載: ${url.substring(0, 30)}...`,
-            status: 'pending',
-            progress: '排隊中...',
-            data: { url }
-        };
-        this.queue.push(task);
-        this.render();
-        this.processNext();
+        const name = `下載: ${url.substring(0, 30)}...`;
+        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'download', name, data: {url}}) });
+        this.fetchQueue();
         showToast('已加入下載佇列', 'success');
     },
 
-    addDirectDownloadTask(url) {
-        if (!url) {
-            showToast('請輸入連結', 'error');
-            return;
-        }
-        const task = {
-            id: ++this.taskIdCounter,
-            type: 'direct-download',
-            name: `直接下載: ${url.substring(0, 30)}...`,
-            status: 'pending',
-            progress: '排隊中...',
-            data: { url }
-        };
-        this.queue.push(task);
-        this.render();
-        this.processNext();
+    async addDirectDownloadTask(url) {
+        if (!url) { showToast('請輸入連結', 'error'); return; }
+        const name = `直接下載: ${url.substring(0, 30)}...`;
+        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'direct-download', name, data: {url}}) });
+        this.fetchQueue();
         showToast('已加入下載佇列', 'success');
     },
 
-    addVideoNoteTask() {
+    async addVideoNoteTask() {
         if (!currentDirectVideoFilename) return;
-        const task = {
-            id: ++this.taskIdCounter,
-            type: 'video-note',
-            name: `影片轉筆記`,
-            status: 'pending',
-            progress: '排隊中...',
-            data: { filename: currentDirectVideoFilename, url: currentDirectVideoUrl }
-        };
-        this.queue.push(task);
-        this.render();
-        this.processNext();
+        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'video-note', name: '影片轉筆記', data: {filename: currentDirectVideoFilename, url: currentDirectVideoUrl}}) });
+        this.fetchQueue();
         showToast('已加入影片轉筆記佇列', 'success');
     },
 
-    updateTask(id, progress) {
-        const task = this.queue.find(t => t.id === id);
-        if (task) {
-            task.progress = progress;
-            this.render();
-        }
-    },
-
-    clearDone() {
-        this.queue = this.queue.filter(t => t.status === 'pending' || t.status === 'processing');
-        this.render();
-    },
-
-    async processNext() {
-        if (this.isProcessing) return;
-        const taskIndex = this.queue.findIndex(t => t.status === 'pending');
-        if (taskIndex === -1) return;
-
-        this.isProcessing = true;
-        const task = this.queue[taskIndex];
-        task.status = 'processing';
-        this.render();
-
-        try {
-            if (task.type === 'process') {
-                await processPostWorker(task);
-            } else if (task.type === 'podcast') {
-                await processPodcastWorker(task);
-            } else if (task.type === 'download') {
-                await downloadVideoWorker(task);
-            } else if (task.type === 'direct-download') {
-                await directDownloadWorker(task);
-            } else if (task.type === 'video-note') {
-                await processVideoNoteWorker(task);
-            }
-            task.status = 'done';
-            task.progress = '處理完成';
-            showToast(`[${task.name}] 處理完成`, 'success');
-        } catch (err) {
-            task.status = 'error';
-            task.progress = `錯誤: ${err.message}`;
-            showToast(`[${task.name}]發生錯誤: ${err.message}`, 'error');
-        }
-
-        this.isProcessing = false;
-        this.render();
-        this.processNext();
+    async clearDone() {
+        await fetch(`${API}/api/tasks/clear`, { method: 'POST' });
+        this.fetchQueue();
     },
 
     render() {
@@ -335,6 +270,10 @@ const TaskQueue = {
         }).join('');
     }
 };
+
+setInterval(() => TaskQueue.fetchQueue(), 2000);
+TaskQueue.fetchQueue();
+
 
 // Formats original X post text for readability
 function formatOriginalText(text) {
@@ -369,120 +308,7 @@ function enqueueProcessPost() {
 }
 
 async function processPostWorker(task) {
-    const url = task.data.url;
-
-    try {
-        // Step 1: Parse tweet
-        setStep('parse');
-        TaskQueue.updateTask(task.id, '解析貼文中...');
-
-        const parseRes = await fetch(`${API}/api/x/parse`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-        const parseData = await parseRes.json();
-
-        if (!parseData.success) throw new Error(parseData.error);
-
-        currentTweet = parseData.tweet;
-        showTweetPreview(currentTweet);
-
-        // Step 2: Handle media (video)
-        setStep('media');
-        let contentForNote = currentTweet.text;
-
-        // Append fetched URL content (article, linked page, etc.)
-        if (currentTweet.fetchedContent) {
-            contentForNote += `\n\n連結頁面內容：\n${currentTweet.fetchedContent}`;
-        }
-
-        if (currentTweet.hasVideo) {
-            // Show video section
-            document.getElementById('videoSection').style.display = 'block';
-
-            // Download video
-            TaskQueue.updateTask(task.id, '下載影片中...');
-            const dlRes = await fetch(`${API}/api/x/download-video`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url })
-            });
-            const dlData = await dlRes.json();
-
-            if (dlData.success) {
-                currentVideoPath = dlData.path;
-                showVideoPlayer(dlData.path);
-
-                // Transcribe
-                TaskQueue.updateTask(task.id, '語音轉逐字稿中...');
-                const trRes = await fetch(`${API}/api/whisper/transcribe`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ videoPath: dlData.filename })
-                });
-                const trData = await trRes.json();
-
-                if (trData.success && trData.text) {
-                    contentForNote = `貼文內容：\n${currentTweet.text}\n\n影片逐字稿：\n${trData.text}`;
-                }
-            }
-        } else {
-            document.getElementById('videoSection').style.display = 'none';
-        }
-
-        // Step 3: Generate note via Gemini
-        setStep('note');
-
-        // Check content quality - strip URLs and whitespace to measure real text
-        const textOnly = contentForNote.replace(/https?:\/\/\S+/g, '').replace(/[@#]\w+/g, '').trim();
-        if (textOnly.length < 20) {
-            showToast('⚠️ 貼文內容較少，筆記品質可能受限', 'info');
-        }
-
-        TaskQueue.updateTask(task.id, '生成中文筆記中...');
-
-        const noteRes = await fetch(`${API}/api/gemini/summarize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content: contentForNote })
-        });
-        const noteData = await noteRes.json();
-
-        if (!noteData.success) throw new Error(noteData.error);
-
-        // Append the source url, author, and original text to the note
-        const authorInfo = currentTweet.author ? `- **推文作者：** @${currentTweet.author}\n` : '';
-        const formattedOriginalText = formatOriginalText(currentTweet.text);
-        const originalTextInfo = formattedOriginalText ? `\n**原始貼文內容：**\n\n${formattedOriginalText}` : '';
-        const transcriptInfo = (currentTweet.hasVideo && currentVideoPath && contentForNote.includes('影片逐字稿：\n')) ? `\n\n**影片逐字稿：**\n\n${contentForNote.split('影片逐字稿：\n')[1] || ''}` : '';
-        
-        const finalNoteContent = `${noteData.text}\n\n---\n\n### 原始來源與內容\n\n- **來源連結：** ${url}\n${authorInfo}${originalTextInfo}${transcriptInfo}`;
-
-        // Step 4: Save to HedgeDoc
-        setStep('save');
-        TaskQueue.updateTask(task.id, '儲存至 HedgeDoc...');
-
-        const noteTitle = currentTweet.articleTitle
-            || `X 貼文筆記 - @${currentTweet.author || 'unknown'} - ${new Date().toLocaleDateString('zh-TW')}`;
-
-        const saveRes = await fetch(`${API}/api/hedgedoc/create`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                content: finalNoteContent,
-                title: noteTitle,
-                sourceUrl: url
-            })
-        });
-        const saveData = await saveRes.json();
-
-        // Show result
-        showNoteResult(finalNoteContent, saveData.success ? saveData.note : null);
-    } catch (e) {
-        console.error(e);
-        throw e;
-    }
+    // Moved to backend TaskQueue
 }
 
 // ─── Show Tweet Preview ──────────────────────────────
@@ -516,27 +342,7 @@ function enqueueDownloadVideo() {
 }
 
 async function downloadVideoWorker(task) {
-    const url = task.data.url;
-    TaskQueue.updateTask(task.id, '下載影片中...');
-
-    try {
-        const res = await fetch(`${API}/api/x/download-video`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-            currentVideoPath = data.path;
-            showVideoPlayer(data.path);
-        } else {
-            throw new Error(data.error);
-        }
-    } catch (e) {
-        console.error(e);
-        throw e;
-    }
+    // Moved to backend TaskQueue
 }
 
 // ─── Direct Download ──────────────────────────────────
@@ -551,37 +357,7 @@ function enqueueDirectDownload() {
 }
 
 async function directDownloadWorker(task) {
-    const url = task.data.url;
-    TaskQueue.updateTask(task.id, '下載影片中...');
-
-    try {
-        const res = await fetch(`${API}/api/x/download-video`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ url })
-        });
-        const data = await res.json();
-
-        if (data.success) {
-            currentDirectVideoPath = data.path;
-            currentDirectVideoFilename = data.filename;
-            currentDirectVideoUrl = url;
-            document.getElementById('btnPlayDirect').style.display = 'flex';
-            document.getElementById('videoActionContainer').style.display = 'block';
-
-            const player = document.getElementById('directVideoPlayer');
-            player.src = data.path;
-            document.getElementById('directVideoContainer').style.display = 'block';
-            
-            // Refresh video list
-            loadVideosList();
-        } else {
-            throw new Error(data.error);
-        }
-    } catch (e) {
-        console.error(e);
-        throw e;
-    }
+    // Moved to backend TaskQueue
 }
 
 function playDirectVideo() {
@@ -600,85 +376,7 @@ function enqueueVideoToNote() {
 }
 
 async function processVideoNoteWorker(task) {
-    const { filename, url } = task.data;
-
-    // Transcribe
-    TaskQueue.updateTask(task.id, '語音轉逐字稿中...');
-    const trRes = await fetch(`${API}/api/whisper/transcribe`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ videoPath: filename })
-    });
-    const trData = await trRes.json();
-    
-    if (!trData.success || !trData.text) {
-        throw new Error('語音辨識失敗或無內容');
-    }
-    
-    const contentForNote = `來源連結：${url}\n\n影片逐字稿：\n${trData.text}`;
-    
-    // Generate Note
-    TaskQueue.updateTask(task.id, '生成中文筆記中...');
-    const noteRes = await fetch(`${API}/api/gemini/summarize`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: contentForNote })
-    });
-    const noteData = await noteRes.json();
-
-    if (!noteData.success) throw new Error(noteData.error);
-    
-    // Extract Title from Gemini response
-    const titleMatch = noteData.text.match(/^#\s+(.+)$/m);
-    let generatedTitle = `影片逐字稿筆記 - ${new Date().toLocaleDateString('zh-TW')}`;
-    if (titleMatch && titleMatch[1]) {
-        // Remove markdown artifacts like bolding if present inside the title
-        generatedTitle = titleMatch[1].replace(/\*\*/g, '').replace(/__/g, '').trim(); 
-    }
-    
-    // Append the source url and transcript to the note
-    const finalNoteContent = `${noteData.text}\n\n---\n\n### 原始來源與逐字稿\n\n- **來源連結：** ${url}\n\n**影片完整逐字稿：**\n\n${trData.text}`;
-
-    // Rename Video on the server
-    TaskQueue.updateTask(task.id, '重新命名影片檔案...');
-    try {
-        const renameRes = await fetch(`${API}/api/videos/rename`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ oldFilename: filename, newTitle: generatedTitle })
-        });
-        const renameData = await renameRes.json();
-        
-        if (renameData.success && renameData.newFilename) {
-            // Update currently playing video stats to match new names
-            if (currentDirectVideoFilename === filename) {
-                currentDirectVideoFilename = renameData.newFilename;
-                currentDirectVideoPath = renameData.newPath;
-                document.getElementById('directVideoPlayer').src = renameData.newPath;
-            }
-        }
-    } catch(e) {
-        console.error('Failed to rename video:', e);
-    }
-    
-    // Refresh the videos list
-    loadVideosList();
-
-    // Save to HedgeDoc
-    TaskQueue.updateTask(task.id, '儲存至 HedgeDoc...');
-    const saveRes = await fetch(`${API}/api/hedgedoc/create`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            content: finalNoteContent,
-            title: generatedTitle,
-            sourceUrl: url
-        })
-    });
-    const saveData = await saveRes.json();
-
-    // Show result
-    showVideoNoteResult(finalNoteContent, saveData.success ? saveData.note : null);
+    // Moved to backend TaskQueue
 }
 
 function showVideoNoteResult(content, noteEntry) {
@@ -949,131 +647,12 @@ function showScriptPreview(script) {
 }
 
 async function processPodcastWorker(task) {
-    const { noteIds, title, language } = task.data;
-
-    TaskQueue.updateTask(task.id, '讀取 Hedgehog 筆記中...');
-
-    const notesRes = await fetch(`${API}/api/hedgedoc/list`);
-    const notesData = await notesRes.json();
-    const selectedNotes = notesData.notes.filter(n => noteIds.includes(n.id));
-
-    let combinedContent = '';
-    let combinedTitle = '';
-
-    for (const note of selectedNotes) {
-        combinedTitle += (combinedTitle ? ' & ' : '') + note.title;
-        try {
-            const settingsRes = await fetch(`${API}/api/settings`);
-            const settings = await settingsRes.json();
-            const noteId = note.url.split('/').pop();
-            const contentRes = await fetch(`${settings.hedgedocUrl}/${noteId}/download`, {
-                headers: { 'Cookie': settings.hedgedocCookie || '' }
-            });
-            if (contentRes.ok) {
-                const content = await contentRes.text();
-                combinedContent += `\n\n--- ${note.title} ---\n${content}`;
-            } else {
-                combinedContent += `\n\n--- ${note.title} ---\n（標題：${note.title}）`;
-            }
-        } catch {
-            combinedContent += `\n\n--- ${note.title} ---\n（標題：${note.title}）`;
-        }
-    }
-
-    // Determine duration based on total text length
-    const minutes = combinedContent.length > 2000 ? 12 : 5;
-
-    TaskQueue.updateTask(task.id, `📍 正在用 Gemini 生成 ${minutes} 分鐘講稿...`);
-    const scriptRes = await fetch(`${API}/api/podcast/generate-script`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            noteContents: combinedContent,
-            noteTitle: combinedTitle || title,
-            language: language,
-            minutes: minutes
-        })
-    });
-    const scriptData = await scriptRes.json();
-
-    if (!scriptData.success) {
-        throw new Error(scriptData.error || '講稿生成失敗');
-    }
-
-    const script = scriptData.script;
-    currentScript = script; // Keep this mainly for UI display if needed
-    showScriptPreview(script);
-
-    TaskQueue.updateTask(task.id, '📍 正在發送講稿到 Kokoro 生成語音...');
-    const audioRes = await fetch(`${API}/api/podcast/generate-audio`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-            script: script,
-            title: `🎙️ ${combinedTitle || title}`,
-            language: language
-        })
-    });
-
-    const data = await audioRes.json();
-    if (!data.success) throw new Error(data.error);
-
-    const taskId = data.taskId;
-    if (!taskId) throw new Error('未取得 task_id');
-
-    TaskQueue.updateTask(task.id, `Kokoro 語音生成中... (Task: ${taskId.substring(0, 8)}...)`);
-    const podcast = await pollTaskStatus(taskId, data.podcast, task.id);
-
-    if (podcast && podcast.audioPath) {
-        playPodcast(podcast);
-        loadPodcastList();
-    } else {
-        console.error('Missing audioPath in podcast:', podcast, 'From task completion data.');
-        throw new Error(`語音生成完成但無法取得音檔，查無路徑: ${JSON.stringify(podcast)}`);
-    }
+    // Moved to backend TaskQueue
 }
 
 // ─── Podcast: Poll Task Status ────────────────────────
 async function pollTaskStatus(taskId, podcastEntry, queueTaskId) {
-    const maxWait = 7200; // 2 hours max
-    const interval = 5; // Check every 5 seconds
-    let elapsed = 0;
-
-    while (elapsed < maxWait) {
-        await new Promise(resolve => setTimeout(resolve, interval * 1000));
-        elapsed += interval;
-
-        try {
-            const res = await fetch(`${API}/api/podcast/task-status/${taskId}`);
-            const data = await res.json();
-
-            if (data.status === 'completed') {
-                const listRes = await fetch(`${API}/api/podcast/list`);
-                const listData = await listRes.json();
-                const updated = listData.podcasts.find(p => p.taskId === taskId);
-                return updated || { ...podcastEntry, audioPath: data.audio_url, status: 'completed' };
-            } else if (data.status === 'failed' || data.status === 'error') {
-                throw new Error(data.error || '語音生成任務失敗');
-            } else {
-                const progress_percent = Math.round(data.progress_percent || data.progress || 0);
-                const current_step = data.current_step || data.step || 0;
-                const total_steps = data.total_steps || 0;
-
-                const mins = Math.floor(elapsed / 60);
-                const secs = elapsed % 60;
-
-                const timeStr = `${mins}:${secs.toString().padStart(2, '0')}`;
-                if (queueTaskId) {
-                    TaskQueue.updateTask(queueTaskId, `任務生成中... ${timeStr}<br>進度：${progress_percent}% (${current_step}/${total_steps})`);
-                }
-            }
-        } catch (e) {
-            if (e.message.includes('失敗')) throw e;
-            console.log('Status check error:', e.message);
-        }
-    }
-
-    throw new Error('語音生成超時（超過 10 分鐘）');
+    // Moved to backend TaskQueue Worker
 }
 
 // ─── Podcast: Player ──────────────────────────────────
