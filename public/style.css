@@ -48,6 +48,10 @@
   --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Bottom tab bar height (mobile) */
+  --tab-bar-height: 60px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
 /* ─── Reset ────────────────────────────────────────── */
@@ -62,6 +66,8 @@
 html {
   font-size: 16px;
   scroll-behavior: smooth;
+  /* Prevent text size adjustment on iOS */
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -69,8 +75,11 @@ body {
   background: var(--bg-primary);
   color: var(--text-primary);
   min-height: 100vh;
+  min-height: -webkit-fill-available;
   line-height: 1.6;
   overflow-x: hidden;
+  /* iOS momentum scroll */
+  -webkit-overflow-scrolling: touch;
 }
 
 /* Background ambient glow */
@@ -1053,6 +1062,433 @@ textarea {
   }
 }
 
+/* ─────────────────────────────────────────────────────
+   iPhone 13 Pro Max & Mobile Optimization
+   Target: 390pt wide, 844pt tall (iPhone 13 Pro Max)
+   ───────────────────────────────────────────────────── */
+@media (max-width: 430px) {
+
+  /* ── Base Layout ── */
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  #app {
+    flex-direction: column;
+    min-height: 100svh;
+  }
+
+  /* ── Bottom Tab Bar (replaces sidebar) ── */
+  .sidebar {
+    width: 100%;
+    height: calc(var(--tab-bar-height) + var(--safe-bottom));
+    padding-bottom: var(--safe-bottom);
+    position: fixed;
+    bottom: 0;
+    top: auto;
+    left: 0;
+    right: 0;
+    flex-direction: row;
+    justify-content: space-around;
+    align-items: center;
+    padding-left: 0;
+    padding-right: 0;
+    padding-top: 0;
+    gap: 0;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    background: rgba(10, 14, 26, 0.95);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    z-index: 200;
+  }
+
+  .sidebar-logo {
+    display: none;
+  }
+
+  .nav-btn {
+    flex: 1;
+    height: var(--tab-bar-height);
+    width: auto;
+    border-radius: 0;
+    font-size: 24px;
+    flex-direction: column;
+    gap: 2px;
+    /* Large touch target */
+    min-height: 44px;
+  }
+
+  .nav-btn .tooltip {
+    /* Show label below icon in tab bar */
+    position: static;
+    font-size: 9px;
+    opacity: 1;
+    transform: none;
+    pointer-events: none;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    padding: 0;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+
+  .nav-btn.active .tooltip {
+    color: var(--accent-primary);
+  }
+
+  .nav-btn.active::before {
+    left: 50%;
+    top: 0;
+    bottom: auto;
+    width: 32px;
+    height: 3px;
+    transform: translateX(-50%);
+    border-radius: 0 0 4px 4px;
+  }
+
+  /* ── Main Content ── */
+  .main-content {
+    margin-left: 0;
+    margin-bottom: calc(var(--tab-bar-height) + var(--safe-bottom));
+    width: 100%;
+    overflow-x: hidden;
+  }
+
+  .page {
+    padding: 16px 14px;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  /* ── Page Header ── */
+  .page-header {
+    margin-bottom: 16px;
+  }
+
+  .page-header h1 {
+    font-size: 20px;
+  }
+
+  .page-header p {
+    font-size: 13px;
+  }
+
+  /* ── Cards ── */
+  .card {
+    padding: 14px;
+    margin-bottom: 12px;
+    border-radius: var(--radius-md);
+  }
+
+  .card-header {
+    gap: 10px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+  }
+
+  .card-header .icon {
+    width: 34px;
+    height: 34px;
+    font-size: 17px;
+    flex-shrink: 0;
+  }
+
+  .card-header h3 {
+    font-size: 15px;
+  }
+
+  .card-header p {
+    font-size: 12px;
+  }
+
+  /* ── Input Row — stack vertically on mobile ── */
+  .input-row {
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .input-row input {
+    width: 100%;
+    font-size: 16px; /* Prevent iOS zoom */
+  }
+
+  .input-row .btn {
+    width: 100%;
+    justify-content: center;
+    min-height: 48px;
+  }
+
+  #processStatus {
+    font-size: 13px;
+    text-align: center;
+  }
+
+  /* ── All inputs: prevent iOS auto-zoom (need 16px+) ── */
+  input[type="text"],
+  input[type="url"],
+  input[type="password"],
+  select,
+  textarea {
+    font-size: 16px;
+    padding: 12px 14px;
+  }
+
+  /* ── Buttons — bigger touch targets ── */
+  .btn {
+    min-height: 44px;
+    padding: 10px 16px;
+    font-size: 14px;
+  }
+
+  .btn-sm {
+    min-height: 36px;
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  /* ── Process Steps — scrollable row ── */
+  .process-steps {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px;
+    gap: 0;
+    margin-bottom: 14px;
+  }
+
+  .process-step {
+    min-width: 72px;
+    padding: 10px 8px;
+    font-size: 11px;
+  }
+
+  .process-step .step-num {
+    display: block;
+    margin: 0 auto 4px;
+  }
+
+  /* ── Grid: always 1 column ── */
+  .grid-2 {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .settings-grid {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .settings-group {
+    padding: 14px;
+  }
+
+  /* ── Download section — stack ── */
+  .download-section {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .download-section input {
+    width: 100%;
+  }
+
+  .download-section .btn {
+    width: 100%;
+  }
+
+  /* ── Note Items ── */
+  .note-item {
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .note-item .note-actions {
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .note-item .note-actions .btn {
+    width: 100%;
+    min-height: 40px;
+  }
+
+  /* ── Podcast Item ── */
+  .podcast-item {
+    padding: 14px;
+  }
+
+  .podcast-item-header {
+    gap: 10px;
+  }
+
+  /* ── Note select list (Podcast page) ── */
+  .note-select-list {
+    max-height: 200px;
+  }
+
+  /* ── Podcast language + generate button ── */
+  #page-podcast .flex.gap-2 {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  #podcastLanguage {
+    width: 100% !important;
+  }
+
+  #btnGenPodcast {
+    width: 100% !important;
+  }
+
+  /* ── RAG result buttons in card header ── */
+  #page-rag .card-header {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #page-rag .card-header > div:first-of-type {
+    flex: 1;
+    min-width: 0;
+  }
+
+  #btnRagToHedgedoc,
+  #btnRagSocialPost {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    justify-content: center;
+    text-align: center;
+    font-size: 12px;
+    padding: 8px 6px;
+    margin-left: 0 !important;
+  }
+
+  /* ── RAG query input row ── */
+  #page-rag .input-row {
+    flex-direction: column;
+  }
+
+  /* ── RAG collection checkboxes ── */
+  #page-rag div[style*="display:flex; gap:16px"] {
+    flex-wrap: wrap;
+    gap: 12px !important;
+  }
+
+  /* ── Social post action buttons ── */
+  #ragSocialResult > div > button {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+
+  /* ── md-preview max-height relax ── */
+  .md-preview {
+    max-height: 320px;
+    font-size: 14px;
+    padding: 14px;
+  }
+
+  .script-preview {
+    max-height: 280px;
+    font-size: 13px;
+    padding: 14px;
+  }
+
+  /* ── Audio Player ── */
+  .audio-player {
+    padding: 14px;
+  }
+
+  .audio-play-btn {
+    width: 52px;
+    height: 52px;
+    font-size: 22px;
+  }
+
+  .audio-title {
+    font-size: 13px;
+  }
+
+  /* ── Video player max height ── */
+  .video-container video {
+    max-height: 220px;
+  }
+
+  /* ── Global Queue — full width on mobile ── */
+  #globalQueue {
+    bottom: calc(var(--tab-bar-height) + var(--safe-bottom) + 8px) !important;
+    right: 8px !important;
+    left: 8px !important;
+    width: auto !important;
+    max-height: 320px !important;
+    border-radius: var(--radius-lg) !important;
+  }
+
+  /* ── Toast — full width safe ── */
+  .toast-container {
+    top: 12px;
+    right: 10px;
+    left: 10px;
+  }
+
+  .toast {
+    max-width: 100%;
+    font-size: 13px;
+    padding: 12px 14px;
+  }
+
+  /* ── Podcast player card header buttons ── */
+  #podcastPlayerCard .card-header {
+    flex-wrap: wrap;
+  }
+
+  #podcastPlayerCard .card-header button[onclick="enterDrivingMode()"] {
+    width: 100%;
+    justify-content: center;
+    margin-left: 0 !important;
+    margin-top: 6px;
+  }
+
+  /* ── Tweet preview badges ── */
+  .tweet-badges {
+    flex-wrap: wrap;
+  }
+
+  /* ── Settings buttons ── */
+  .flex.gap-3.mt-4 {
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .flex.gap-3.mt-4 .btn {
+    width: 100%;
+    justify-content: center;
+  }
+
+  /* ── Misc inline-style overrides for video section ── */
+  #videoSection .card-header .flex.gap-2 {
+    width: 100%;
+    margin-left: 0 !important;
+    margin-top: 8px;
+  }
+
+  #btnDownloadVideo {
+    margin-top: 0 !important;
+  }
+
+  /* Empty state compact */
+  .empty-state {
+    padding: 30px 16px;
+  }
+
+  .empty-state .icon {
+    font-size: 36px;
+    margin-bottom: 10px;
+  }
+}
+
 /* ─── Scrollbar ────────────────────────────────────── */
 ::-webkit-scrollbar {
   width: 6px;
@@ -1072,8 +1508,8 @@ textarea {
   background: rgba(255, 255, 255, 0.2);
 }
 
-/* ─── Responsive bottom nav for mobile ─────────────── */
-@media (max-width: 600px) {
+/* ─── Tablet / small laptop (601px–900px) ──────────── */
+@media (max-width: 600px) and (min-width: 431px) {
   .sidebar {
     width: 100%;
     height: 60px;
@@ -1081,8 +1517,8 @@ textarea {
     bottom: 0;
     top: auto;
     flex-direction: row;
-    justify-content: center;
-    padding: 0 10px;
+    justify-content: space-around;
+    padding: 0;
     border-right: none;
     border-top: 1px solid var(--border);
   }
@@ -1091,13 +1527,19 @@ textarea {
     display: none;
   }
 
+  .nav-btn {
+    flex: 1;
+    height: 60px;
+    border-radius: 0;
+  }
+
   .nav-btn.active::before {
     left: 50%;
-    top: -14px;
-    width: 24px;
-    height: 4px;
+    top: 0;
+    width: 32px;
+    height: 3px;
     transform: translateX(-50%);
-    border-radius: 4px 4px 0 0;
+    border-radius: 0 0 4px 4px;
   }
 
   .main-content {
@@ -1107,6 +1549,14 @@ textarea {
 
   .nav-btn .tooltip {
     display: none;
+  }
+
+  .grid-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .page {
+    padding: 20px 16px;
   }
 }
 
