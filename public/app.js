@@ -1162,14 +1162,8 @@ function onPodcastEnded() {
     if (currentPodcastId) {
         savePodcastProgress(currentPodcastId, 0, document.getElementById('podcastAudio').duration);
         
-        // Auto play next podcast sequentially
-        if (window.loadedPodcasts && window.loadedPodcasts.length > 0) {
-            const currentIndex = window.loadedPodcasts.findIndex(p => p.id === currentPodcastId);
-            if (currentIndex !== -1 && currentIndex < window.loadedPodcasts.length - 1) {
-                // There is a next podcast, play it directly
-                playPodcast(window.loadedPodcasts[currentIndex + 1]);
-            }
-        }
+        // Auto play next podcast sequentially (looping)
+        playNextPodcast();
     }
 }
 
@@ -1286,22 +1280,20 @@ function formatTime(seconds) {
 
 // ─── Driving Mode & Sequential Play Logic ──────────────
 function playNextPodcast() {
-    if (!window.loadedPodcasts || !currentPodcastId) return;
+    if (!window.loadedPodcasts || !currentPodcastId || window.loadedPodcasts.length === 0) return;
     const currentIndex = window.loadedPodcasts.findIndex(p => p.id === currentPodcastId);
-    if (currentIndex !== -1 && currentIndex < window.loadedPodcasts.length - 1) {
-        playPodcast(window.loadedPodcasts[currentIndex + 1]);
-    } else {
-        showToast('已經是最後一首', 'info');
+    if (currentIndex !== -1) {
+        const nextIndex = (currentIndex + 1) % window.loadedPodcasts.length;
+        playPodcast(window.loadedPodcasts[nextIndex]);
     }
 }
 
 function playPrevPodcast() {
-    if (!window.loadedPodcasts || !currentPodcastId) return;
+    if (!window.loadedPodcasts || !currentPodcastId || window.loadedPodcasts.length === 0) return;
     const currentIndex = window.loadedPodcasts.findIndex(p => p.id === currentPodcastId);
-    if (currentIndex > 0) {
-        playPodcast(window.loadedPodcasts[currentIndex - 1]);
-    } else {
-        showToast('已經是第一首', 'info');
+    if (currentIndex !== -1) {
+        const prevIndex = (currentIndex - 1 + window.loadedPodcasts.length) % window.loadedPodcasts.length;
+        playPodcast(window.loadedPodcasts[prevIndex]);
     }
 }
 

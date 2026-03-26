@@ -895,6 +895,8 @@ textarea {
   overflow-y: auto;
   font-size: 14px;
   line-height: 1.8;
+  word-break: break-word;
+  white-space: pre-wrap;
 }
 
 .md-preview h1,
@@ -1006,6 +1008,7 @@ textarea {
   margin-top: 12px;
   font-size: 14px;
   line-height: 1.9;
+  word-break: break-word;
 }
 
 .script-preview .speaker-a {
