@@ -291,7 +291,19 @@ function formatOriginalText(text) {
         .join('\n');
 }
 
-// ─── Process X Post ───────────────────────────────────
+async function pasteFromClipboard(targetId = 'postUrl') {
+    try {
+        const text = await navigator.clipboard.readText();
+        if (text) {
+            document.getElementById(targetId).value = text.trim();
+        } else {
+            showToast('剪貼簿沒有內容', 'info');
+        }
+    } catch (err) {
+        showToast('無法讀取剪貼簿，請允許權限或手動貼上', 'error');
+    }
+}
+
 function enqueueProcessPost() {
     const url = document.getElementById('postUrl').value.trim();
     if (!url) {
