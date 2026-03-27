@@ -64,7 +64,7 @@
           </div>
           <div class="input-row">
             <input type="url" id="postUrl" placeholder="https://x.com/user/status/1234567890..." />
-            <button class="btn btn-secondary btn-icon" title="貼上剪貼簿" onclick="pasteFromClipboard()" style="flex-shrink:0;">
+            <button type="button" class="btn btn-secondary btn-icon" title="貼上剪貼簿" onclick="pasteFromClipboard()" style="flex-shrink:0;">
               📋
             </button>
             <button class="btn btn-primary" id="btnProcess" onclick="enqueueProcessPost()">
@@ -164,7 +164,7 @@
           </div>
           <div class="download-section">
             <input type="url" id="downloadUrl" placeholder="貼入任何影片連結..." />
-            <button class="btn btn-secondary btn-icon" title="貼上剪貼簿" onclick="pasteFromClipboard('downloadUrl')" style="flex-shrink:0;">
+            <button type="button" class="btn btn-secondary btn-icon" title="貼上剪貼簿" onclick="pasteFromClipboard('downloadUrl')" style="flex-shrink:0;">
               📋
             </button>
             <button class="btn btn-secondary" id="btnDirectDownload" onclick="enqueueDirectDownload()"

@@ -292,17 +292,40 @@ function formatOriginalText(text) {
 }
 
 async function pasteFromClipboard(targetId = 'postUrl') {
+    // Check for Clipboard API support properly
+    if (!navigator.clipboard || !navigator.clipboard.readText) {
+        if (!window.isSecureContext) {
+            showToast('剪貼簿 API 僅支援 HTTPS 連線。請檢查網址是否為 https://', 'warning');
+        } else {
+            showToast('瀏覽器不支援自動貼上，請手動貼上。', 'warning');
+        }
+        return;
+    }
+
     try {
         const text = await navigator.clipboard.readText();
-        if (text) {
-            document.getElementById(targetId).value = text.trim();
+        if (text && text.trim()) {
+            const input = document.getElementById(targetId);
+            if (input) {
+                input.value = text.trim();
+                showToast('已從剪貼簿貼上', 'success');
+                // Manually trigger an input event for better compatibility
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        } else if (text === '') {
+            showToast('剪貼簿目前沒有文字', 'info');
         } else {
-            showToast('剪貼簿沒有內容', 'info');
+            // navigator.clipboard.readText() might return empty or null depending on permissions
+            showToast('讀取不到內容，請確保已允許存取剪貼簿', 'warning');
         }
     } catch (err) {
-        showToast('無法讀取剪貼簿，請允許權限或手動貼上', 'error');
+        console.error('Clipboard error:', err);
+        // iOS Safari may show NotAllowedError if the user denies the prompt or it's not a clear gesture
+        showToast('無法讀取剪貼簿，請允許貼上權限或手動輸入', 'error');
     }
 }
+
+
 
 function enqueueProcessPost() {
     const url = document.getElementById('postUrl').value.trim();
