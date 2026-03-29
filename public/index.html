@@ -23,6 +23,10 @@
         🎬
         <span class="tooltip">影片工具</span>
       </button>
+      <button class="nav-btn" data-page="tasks" id="nav-tasks" onclick="switchPage('tasks')">
+        ⏳
+        <span class="tooltip">任務列表</span>
+      </button>
       <button class="nav-btn" data-page="notes" id="nav-notes" onclick="switchPage('notes')">
         📋
         <span class="tooltip">筆記列表</span>
@@ -219,6 +223,32 @@
             </a>
           </div>
           <div class="md-preview" id="videoNoteContent"></div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Tasks                                    -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-tasks" class="page">
+        <div class="page-header">
+          <h1>⏳ 任務列表</h1>
+          <p>檢視目前所有背景影片下載、轉譯與筆記產生任務的進度</p>
+          <button class="btn btn-secondary btn-sm" onclick="TaskQueue.clearDone()" style="margin-top:10px;">清除已完成</button>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="icon blue">⏱️</div>
+            <div>
+              <h3>處理佇列</h3>
+              <p>所有背景任務狀態</p>
+            </div>
+          </div>
+          <div id="tasksPageList">
+            <div class="empty-state" style="padding:20px">
+              <div class="icon">📭</div>
+              <p>目前沒有任何任務執行中</p>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -567,6 +597,19 @@
     <button id="btnToggleLock" class="driving-toggle-lock" onclick="toggleDrivingLock()">
       🔓 鎖定畫面
     </button>
+  </div>
+
+  <!-- Task Complete Modal -->
+  <div id="taskCompleteModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.6); z-index:10000; align-items:center; justify-content:center; backdrop-filter:blur(4px);">
+    <div class="card fade-in" style="width:90%; max-width:400px; text-align:center; padding:30px; box-shadow:0 25px 50px -12px rgba(0,0,0,0.5);">
+       <div style="font-size:48px; margin-bottom:15px;">🎉</div>
+       <h2 style="margin-bottom:10px; font-size:22px; color:var(--text-primary);">筆記處理完成！</h2>
+       <p id="taskCompleteName" style="color:var(--text-muted); margin-bottom:25px; font-size:14px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></p>
+       <div style="display:flex; flex-direction:column; gap:10px;">
+          <a id="taskCompleteUrlBtn" href="#" target="_blank" class="btn btn-primary" onclick="document.getElementById('taskCompleteModal').style.display='none'" style="font-size:16px; padding:12px; display:inline-flex; justify-content:center;">🔗 立即開啟 HedgeDoc 筆記</a>
+          <button class="btn btn-secondary" onclick="document.getElementById('taskCompleteModal').style.display='none'" style="display:inline-flex; justify-content:center;">繼續留在本頁</button>
+       </div>
+    </div>
   </div>
 
   <script src="app.js"></script>

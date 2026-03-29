@@ -48,6 +48,7 @@ function switchPage(page) {
 
     // Refresh data when switching pages
     if (page === 'notes') loadNotesList();
+    if (page === 'tasks') TaskQueue.render();
     if (page === 'podcast') {
         loadPodcastNoteSelect();
         loadPodcastList();
@@ -191,7 +192,7 @@ const TaskQueue = {
                         
                         // Prevent auto-opening on first load! oldT must exist and be transitioning to done.
                         if (oldT && oldT.status !== 'done' && (t.type === 'process' || t.type === 'video-note') && t.data && t.data.noteUrl) {
-                            newlyDoneUrlList.push(t.data.noteUrl);
+                            newlyDoneUrlList.push({ url: t.data.noteUrl, name: t.name });
                         }
                     }
                 }
@@ -200,9 +201,18 @@ const TaskQueue = {
                     if (typeof loadPodcastList === 'function') loadPodcastList();
                     if (typeof loadVideosList === 'function') loadVideosList();
                     
-                    setTimeout(() => {
-                        newlyDoneUrlList.forEach(url => window.open(url, '_blank'));
-                    }, 500); // Slight delay for the data to refresh first
+                    if (newlyDoneUrlList.length > 0) {
+                        const info = newlyDoneUrlList[newlyDoneUrlList.length - 1]; // get the latest one
+                        const modal = document.getElementById('taskCompleteModal');
+                        const nameEl = document.getElementById('taskCompleteName');
+                        const urlBtn = document.getElementById('taskCompleteUrlBtn');
+                        
+                        if (modal && nameEl && urlBtn) {
+                            nameEl.textContent = info.name || '筆記已就緒';
+                            urlBtn.href = info.url;
+                            modal.style.display = 'flex';
+                        }
+                    }
                 }
             }
         } catch(e) {}
@@ -253,15 +263,18 @@ const TaskQueue = {
     render() {
         const container = document.getElementById('globalQueue');
         const list = document.getElementById('queueList');
-        if (!container || !list) return;
-
+        const pageList = document.getElementById('tasksPageList');
+        
+        let html = '';
         if (this.queue.length === 0) {
-            container.style.display = 'none';
+            if (container) container.style.display = 'none';
+            if (pageList) pageList.innerHTML = `<div class="empty-state" style="padding:20px"><div class="icon">📭</div><p>目前沒有任何任務執行中</p></div>`;
             return;
         }
 
-        container.style.display = 'block';
-        list.innerHTML = this.queue.map(t => {
+        if (container) container.style.display = 'block';
+        
+        html = this.queue.map(t => {
             let icon = '⏳';
             if (t.status === 'processing') icon = '<span class="spinner" style="width:14px;height:14px;border-width:2px;border-top-color:var(--accent-primary);"></span>';
             if (t.status === 'done') icon = '✅';
@@ -272,12 +285,15 @@ const TaskQueue = {
             return `
             <div style="background:var(--bg-input); border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:8px; opacity:${opacity};">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
-                    <div style="font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:200px;" title="${t.name}">${t.name}</div>
+                    <div style="font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:min(300px, 60vw);" title="${t.name}">${t.name}</div>
                     <div style="font-size:14px; flex-shrink:0;">${icon}</div>
                 </div>
                 <div style="font-size:11px; color:var(--text-muted);">${t.progress}</div>
             </div>`;
         }).join('');
+        
+        if (list) list.innerHTML = html;
+        if (pageList) pageList.innerHTML = html;
     }
 };
 
