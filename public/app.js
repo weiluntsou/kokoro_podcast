@@ -184,35 +184,16 @@ const TaskQueue = {
                 
                 // Refresh lists if any task finished
                 let hasNewlyDone = false;
-                const newlyDoneUrlList = [];
                 for (const t of this.queue) {
                     const oldT = oldQueue.find(o => o.id === t.id);
                     if (t.status === 'done' && (!oldT || oldT.status !== 'done')) {
                         hasNewlyDone = true;
-                        
-                        // Prevent auto-opening on first load! oldT must exist and be transitioning to done.
-                        if (oldT && oldT.status !== 'done' && (t.type === 'process' || t.type === 'video-note') && t.data && t.data.noteUrl) {
-                            newlyDoneUrlList.push({ url: t.data.noteUrl, name: t.name });
-                        }
                     }
                 }
                 if (hasNewlyDone) {
                     if (typeof loadNotesList === 'function') loadNotesList();
                     if (typeof loadPodcastList === 'function') loadPodcastList();
                     if (typeof loadVideosList === 'function') loadVideosList();
-                    
-                    if (newlyDoneUrlList.length > 0) {
-                        const info = newlyDoneUrlList[newlyDoneUrlList.length - 1]; // get the latest one
-                        const modal = document.getElementById('taskCompleteModal');
-                        const nameEl = document.getElementById('taskCompleteName');
-                        const urlBtn = document.getElementById('taskCompleteUrlBtn');
-                        
-                        if (modal && nameEl && urlBtn) {
-                            nameEl.textContent = info.name || '筆記已就緒';
-                            urlBtn.href = info.url;
-                            modal.style.display = 'flex';
-                        }
-                    }
                 }
             }
         } catch(e) {}
@@ -359,8 +340,8 @@ function enqueueProcessPost() {
         showToast('請輸入 X 貼文連結', 'error');
         return;
     }
-    if (!url.match(/https?:\/\/(x\.com|twitter\.com)\/.+/i)) {
-        showToast('請輸入有效的 X 貼文或文章連結', 'error');
+    if (!url.match(/https?:\/\/(x\.com|twitter\.com)\/\w+\/status\/\d+/i)) {
+        showToast('請輸入有效的 X 貼文連結', 'error');
         return;
     }
 
@@ -607,7 +588,7 @@ async function deleteNote(id) {
 // ─── Podcast: Note Selection ──────────────────────────
 async function loadPodcastNoteSelect() {
     try {
-        const res = await fetch(`${API}/api/hedgedoc/list`);
+        const res = await fetch(`${API}/api/hedgedoc/list?_t=${Date.now()}`);
         const data = await res.json();
 
         const container = document.getElementById('podcastNoteSelect');
