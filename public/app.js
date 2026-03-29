@@ -359,8 +359,8 @@ function enqueueProcessPost() {
         showToast('請輸入 X 貼文連結', 'error');
         return;
     }
-    if (!url.match(/https?:\/\/(x\.com|twitter\.com)\/\w+\/status\/\d+/i)) {
-        showToast('請輸入有效的 X 貼文連結', 'error');
+    if (!url.match(/https?:\/\/(x\.com|twitter\.com)\/.+/i)) {
+        showToast('請輸入有效的 X 貼文或文章連結', 'error');
         return;
     }
 
