@@ -128,7 +128,12 @@ async function processPostWorker(task) {
 
   updateServerTask(task.id, '儲存至 HedgeDoc...');
   const noteTitle = currentTweet.articleTitle || `X 貼文筆記 - @${currentTweet.author || 'unknown'} - ${new Date().toLocaleDateString('zh-TW')}`;
-  await internalFetch('/api/hedgedoc/create', { content: finalNoteContent, title: noteTitle, sourceUrl: url });
+  const hdResult = await internalFetch('/api/hedgedoc/create', { content: finalNoteContent, title: noteTitle, sourceUrl: url });
+  
+  if (hdResult && hdResult.note && hdResult.note.url) {
+    task.data = task.data || {};
+    task.data.noteUrl = hdResult.note.url;
+  }
 }
 
 async function downloadVideoWorker(task) {
@@ -161,7 +166,12 @@ async function processVideoNoteWorker(task) {
   }
   
   updateServerTask(task.id, '儲存至 HedgeDoc...');
-  await internalFetch('/api/hedgedoc/create', { content: finalNoteContent, title: generatedTitle, sourceUrl: url });
+  const hdResult = await internalFetch('/api/hedgedoc/create', { content: finalNoteContent, title: generatedTitle, sourceUrl: url });
+
+  if (hdResult && hdResult.note && hdResult.note.url) {
+    task.data = task.data || {};
+    task.data.noteUrl = hdResult.note.url;
+  }
 }
 
 async function processPodcastWorker(task) {

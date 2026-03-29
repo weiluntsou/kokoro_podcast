@@ -174,7 +174,7 @@ const TaskQueue = {
 
     async fetchQueue() {
         try {
-            const res = await fetch(`${API}/api/tasks`);
+            const res = await fetch(`${API}/api/tasks?_t=${Date.now()}`);
             const data = await res.json();
             if (data.success) {
                 const oldQueue = this.queue || [];
@@ -183,16 +183,26 @@ const TaskQueue = {
                 
                 // Refresh lists if any task finished
                 let hasNewlyDone = false;
+                const newlyDoneUrlList = [];
                 for (const t of this.queue) {
                     const oldT = oldQueue.find(o => o.id === t.id);
                     if (t.status === 'done' && (!oldT || oldT.status !== 'done')) {
                         hasNewlyDone = true;
+                        
+                        // Prevent auto-opening on first load! oldT must exist and be transitioning to done.
+                        if (oldT && oldT.status !== 'done' && (t.type === 'process' || t.type === 'video-note') && t.data && t.data.noteUrl) {
+                            newlyDoneUrlList.push(t.data.noteUrl);
+                        }
                     }
                 }
                 if (hasNewlyDone) {
                     if (typeof loadNotesList === 'function') loadNotesList();
                     if (typeof loadPodcastList === 'function') loadPodcastList();
                     if (typeof loadVideosList === 'function') loadVideosList();
+                    
+                    setTimeout(() => {
+                        newlyDoneUrlList.forEach(url => window.open(url, '_blank'));
+                    }, 500); // Slight delay for the data to refresh first
                 }
             }
         } catch(e) {}
@@ -532,7 +542,7 @@ function renderMarkdown(text) {
 // ─── Notes List ───────────────────────────────────────
 async function loadNotesList() {
     try {
-        const res = await fetch(`${API}/api/hedgedoc/list`);
+        const res = await fetch(`${API}/api/hedgedoc/list?_t=${Date.now()}`);
         const data = await res.json();
 
         const container = document.getElementById('notesList');
