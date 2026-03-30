@@ -133,6 +133,8 @@ async function loadSettings() {
         document.getElementById('settingRagUrl').value = settings.ragUrl || 'http://localhost:8866';
         document.getElementById('settingRagModel').value = settings.ragModel || 'sorc/qwen3.5-instruct:0.8b';
         document.getElementById('settingXCookie').value = settings.xCookie || '';
+        const igEl = document.getElementById('settingIgCookie');
+        if (igEl) igEl.value = settings.igCookie || '';
     } catch (e) {
         console.error('Load settings error:', e);
     }
@@ -149,7 +151,8 @@ async function saveSettings() {
             kokoroUrl: document.getElementById('settingKokoroUrl').value.trim().replace(/\/$/, ''),
             ragUrl: document.getElementById('settingRagUrl').value.trim().replace(/\/$/, ''),
             ragModel: document.getElementById('settingRagModel').value.trim(),
-            xCookie: document.getElementById('settingXCookie').value.trim()
+            xCookie: document.getElementById('settingXCookie').value.trim(),
+            igCookie: (document.getElementById('settingIgCookie')?.value || '').trim()
         };
 
         const res = await fetch(`${API}/api/settings`, {
@@ -167,6 +170,37 @@ async function saveSettings() {
     } catch (e) {
         showToast(`儲存失敗: ${e.message}`, 'error');
     }
+}
+
+// ─── Download URL Platform Detector ─────────────────────
+function detectDownloadPlatform(url) {
+    if (!url) return null;
+    if (/instagram\.com\/(p|reel|tv)\//i.test(url)) return { label: '📸 Instagram', color: '#e1306c', bg: '#fce4ec' };
+    if (/x\.com|twitter\.com/i.test(url))           return { label: '✕ X (Twitter)', color: '#1da1f2', bg: '#e3f2fd' };
+    if (/youtube\.com|youtu\.be/i.test(url))         return { label: '▶️ YouTube', color: '#ff0000', bg: '#fce4e4' };
+    if (url.startsWith('http'))                       return { label: '🌐 其他影片', color: '#6c757d', bg: 'var(--bg-input)' };
+    return null;
+}
+
+function onDownloadUrlInput(val) {
+    const badge = document.getElementById('dlPlatformBadge');
+    if (!badge) return;
+    const p = detectDownloadPlatform(val.trim());
+    if (p) {
+        badge.style.display = 'inline-block';
+        badge.style.color = p.color;
+        badge.style.background = p.bg;
+        badge.style.border = `1px solid ${p.color}44`;
+        badge.textContent = p.label;
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+async function pasteAndDetect() {
+    await pasteFromClipboard('downloadUrl');
+    const val = document.getElementById('downloadUrl')?.value || '';
+    onDownloadUrlInput(val);
 }
 
 // ─── Task Queue ───────────────────────────────────────
@@ -225,11 +259,13 @@ const TaskQueue = {
         }
     },
 
-    async addDownloadTask(url) {
+    async addDownloadTask(url, quality = 'best') {
         if (!url) return;
-        const name = `下載: ${url.substring(0, 30)}...`;
+        const platform = /instagram\.com/.test(url) ? 'IG影片' : 'X影片';
+        const qualityLabel = quality !== 'best' ? ` (${quality}p)` : '';
+        const name = `下載 ${platform}${qualityLabel}: ${url.substring(0, 25)}...`;
         try {
-            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'download', name, data: {url}}) });
+            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'download', name, data: {url, quality}}) });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             await this.fetchQueue();
             showToast('已加入下載佇列', 'success');
@@ -239,11 +275,13 @@ const TaskQueue = {
         }
     },
 
-    async addDirectDownloadTask(url) {
+    async addDirectDownloadTask(url, quality = 'best') {
         if (!url) { showToast('請輸入連結', 'error'); return; }
-        const name = `直接下載: ${url.substring(0, 30)}...`;
+        const platform = /instagram\.com/.test(url) ? 'IG影片' : /x\.com|twitter\.com/.test(url) ? 'X影片' : '影片';
+        const qualityLabel = quality !== 'best' ? ` (${quality}p)` : '';
+        const name = `下載 ${platform}${qualityLabel}: ${url.substring(0, 22)}...`;
         try {
-            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'direct-download', name, data: {url}}) });
+            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'direct-download', name, data: {url, quality}}) });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             await this.fetchQueue();
             showToast('已加入下載佇列', 'success');
@@ -425,10 +463,18 @@ async function downloadVideoWorker(task) {
 function enqueueDirectDownload() {
     const url = document.getElementById('downloadUrl').value.trim();
     if (!url) {
-        showToast('請輸入連結', 'error');
+        showToast('請輸入影片連結', 'error');
         return;
     }
-    TaskQueue.addDirectDownloadTask(url);
+    // 識別是否為 IG 連結
+    const isIG = /instagram\.com/.test(url);
+    const isX  = /x\.com|twitter\.com/.test(url);
+    if (!isIG && !isX && !url.startsWith('http')) {
+        showToast('請輸入有效的連結', 'error');
+        return;
+    }
+    const quality = document.getElementById('downloadQuality')?.value || 'best';
+    TaskQueue.addDirectDownloadTask(url, quality);
     document.getElementById('downloadUrl').value = '';
 }
 

@@ -9,5 +9,27 @@
       "url": "https://x.com/test/status/123456"
     },
     "createdAt": "2026-03-30T02:53:37.482Z"
+  },
+  {
+    "id": "1774839935984249",
+    "type": "process",
+    "name": "處理貼文...",
+    "status": "error",
+    "progress": "錯誤: 缺少內容",
+    "data": {
+      "url": "https://x.com/elonmusk/status/123456789"
+    },
+    "createdAt": "2026-03-30T03:05:35.984Z"
+  },
+  {
+    "id": "1774839993308399",
+    "type": "process",
+    "name": "處理貼文...",
+    "status": "error",
+    "progress": "錯誤: 缺少內容",
+    "data": {
+      "url": "https://x.com/elonmusk/status/1234567890123456789"
+    },
+    "createdAt": "2026-03-30T03:06:33.308Z"
   }
 ]

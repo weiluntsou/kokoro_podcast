@@ -47,8 +47,27 @@ function getSettings() {
     kokoroUrl: 'http://localhost:8880',
     ragUrl: 'http://localhost:8866',
     ragModel: 'sorc/qwen3.5-instruct:0.8b',
-    xCookie: ''
+    xCookie: '',
+    igCookie: ''
   });
+}
+
+// ─── yt-dlp Path Helper ──────────────────────────────────────
+function getYtDlpPath() {
+  const candidates = [
+    'yt-dlp',
+    '/usr/local/bin/yt-dlp',
+    '/usr/bin/yt-dlp',
+    '/opt/homebrew/bin/yt-dlp',
+    '/opt/local/bin/yt-dlp',
+    `${process.env.HOME}/.local/bin/yt-dlp`,
+    `${process.env.HOME}/bin/yt-dlp`,
+    `${process.env.HOME}/.cargo/bin/yt-dlp`,
+  ];
+  for (const p of candidates) {
+    try { execSync(`"${p}" --version`, { stdio: 'ignore', timeout: 5000 }); return p; } catch {}
+  }
+  throw new Error('找不到 yt-dlp，請先安裝：pip3 install yt-dlp 或 brew install yt-dlp');
 }
 
 // ─── Background Task Manager ─────────────────────────────────
@@ -137,9 +156,9 @@ async function processPostWorker(task) {
 }
 
 async function downloadVideoWorker(task) {
-  const { url } = task.data;
+  const { url, quality } = task.data;
   updateServerTask(task.id, '下載影片中...');
-  await internalFetch('/api/x/download-video', { url });
+  await internalFetch('/api/x/download-video', { url, quality });
 }
 
 async function processVideoNoteWorker(task) {
@@ -900,56 +919,100 @@ app.post('/api/x/parse', async (req, res) => {
   }
 });
 
-// ─── Download Video (yt-dlp) ─────────────────────────────────
+// ─── Download Video (yt-dlp) — 支援 X / Instagram / YouTube 等 ──
+// 偵測平台並套用對應 cookie
+function buildCookieArgs(url, settings) {
+  const isX = /x\.com|twitter\.com/.test(url);
+  if (isX && settings.xCookie) {
+    const cookieFile = path.join(DATA_DIR, 'x_cookies.txt');
+    fs.writeFileSync(cookieFile, convertCookieToNetscape(settings.xCookie), 'utf-8');
+    return `--cookies "${cookieFile}"`;
+  }
+  // Instagram: yt-dlp 可透過 cookies-from-browser 或 cookie file
+  // 若未設置 IG cookie 則直接嘗試（公開貼文可無 cookie 下載）
+  if (/instagram\.com/.test(url) && settings.igCookie) {
+    const cookieFile = path.join(DATA_DIR, 'ig_cookies.txt');
+    fs.writeFileSync(cookieFile, convertCookieToNetscape(url.includes('instagram') ? settings.igCookie : '', '.instagram.com'), 'utf-8');
+    return `--cookies "${cookieFile}"`;
+  }
+  return '';
+}
+
+// quality: 'best' | '1080' | '720' | '480' | '360'
+function buildFormatArg(quality) {
+  switch (quality) {
+    case '1080': return '-f "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"';
+    case '720':  return '-f "bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=720]+bestaudio/best[height<=720]/best"';
+    case '480':  return '-f "bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=480]+bestaudio/best[height<=480]/best"';
+    case '360':  return '-f "bestvideo[height<=360][ext=mp4]+bestaudio[ext=m4a]/bestvideo[height<=360]+bestaudio/best[height<=360]/best"';
+    default:     return '-f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best"';
+  }
+}
+
 app.post('/api/x/download-video', async (req, res) => {
   try {
-    const { url } = req.body;
+    const { url, quality = 'best' } = req.body;
     if (!url) return res.status(400).json({ error: '缺少 URL' });
 
-    const match = url.match(/status\/(\d+)/);
-    const videoId = match ? match[1] : Date.now().toString();
-    const outputPath = path.join(VIDEOS_DIR, `${videoId}.mp4`);
-    const metaPath = path.join(VIDEOS_DIR, `${videoId}.meta.json`);
-    const settings = getSettings();
+    // ── 產生安全的檔案 ID ──
+    // X: 用 status ID；IG: 用 shortcode；其他: timestamp
+    let videoId;
+    const xMatch = url.match(/status\/(\d+)/);
+    const igMatch = url.match(/(?:instagram\.com\/(?:p|reel|tv)\/([A-Za-z0-9_-]+))/);
+    if (xMatch)    videoId = xMatch[1];
+    else if (igMatch) videoId = `ig_${igMatch[1]}`;
+    else           videoId = `vid_${Date.now()}`;
 
-    // Check if already downloaded
+    // 畫質後綴 (同一影片不同畫質分開存)
+    const qualitySuffix = quality !== 'best' ? `_${quality}p` : '';
+    const fileBase = `${videoId}${qualitySuffix}`;
+    const outputPath = path.join(VIDEOS_DIR, `${fileBase}.mp4`);
+    const metaPath   = path.join(VIDEOS_DIR, `${fileBase}.meta.json`);
+    const settings   = getSettings();
+
+    // ── 已下載過則直接回傳 ──
     if (fs.existsSync(outputPath)) {
-      if (!fs.existsSync(metaPath)) { fs.writeFileSync(metaPath, JSON.stringify({ url }), 'utf8'); }
-      return res.json({ success: true, filename: `${videoId}.mp4`, path: `/api/videos/${videoId}.mp4` });
+      if (!fs.existsSync(metaPath)) { fs.writeFileSync(metaPath, JSON.stringify({ url, quality }), 'utf8'); }
+      return res.json({ success: true, filename: `${fileBase}.mp4`, path: `/api/videos/${fileBase}.mp4`, quality });
     }
 
-    let cookieArgs = '';
-    if (settings.xCookie) {
-      // Write temp cookie file
-      const cookieFile = path.join(DATA_DIR, 'x_cookies.txt');
-      fs.writeFileSync(cookieFile, convertCookieToNetscape(settings.xCookie), 'utf-8');
-      cookieArgs = `--cookies "${cookieFile}"`;
-    }
+    const ytDlp = getYtDlpPath();
+    const cookieArgs = buildCookieArgs(url, settings);
+    const formatArg  = buildFormatArg(quality);
 
-    const cmd = `yt-dlp ${cookieArgs} -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 -o "${outputPath}" "${url}"`;
+    const cmd = `"${ytDlp}" ${cookieArgs} ${formatArg} --merge-output-format mp4 --no-playlist -o "${outputPath}" "${url}"`;
+    console.log(`[download] cmd: ${cmd.replace(/--cookies "[^"]+"/, '--cookies <hidden>')}`);
 
-    execSync(cmd, { encoding: 'utf-8', timeout: 120000 });
+    execSync(cmd, { encoding: 'utf-8', timeout: 180000 });
 
     if (fs.existsSync(outputPath)) {
-      fs.writeFileSync(metaPath, JSON.stringify({ url }), 'utf8');
-      res.json({ success: true, filename: `${videoId}.mp4`, path: `/api/videos/${videoId}.mp4` });
+      fs.writeFileSync(metaPath, JSON.stringify({ url, quality }), 'utf8');
+      res.json({ success: true, filename: `${fileBase}.mp4`, path: `/api/videos/${fileBase}.mp4`, quality });
     } else {
-      // Check for other extensions
-      const files = fs.readdirSync(VIDEOS_DIR).filter(f => f.startsWith(videoId) && !f.endsWith('.meta.json'));
+      // 有時 yt-dlp 輸出非 .mp4（罕見），掃描找檔案
+      const files = fs.readdirSync(VIDEOS_DIR).filter(f => f.startsWith(fileBase) && !f.endsWith('.meta.json'));
       if (files.length > 0) {
         const returnedFile = files[0];
         const baseName = returnedFile.replace(/\.[^/.]+$/, '');
-        fs.writeFileSync(path.join(VIDEOS_DIR, `${baseName}.meta.json`), JSON.stringify({ url }), 'utf8');
-        res.json({ success: true, filename: returnedFile, path: `/api/videos/${returnedFile}` });
+        fs.writeFileSync(path.join(VIDEOS_DIR, `${baseName}.meta.json`), JSON.stringify({ url, quality }), 'utf8');
+        res.json({ success: true, filename: returnedFile, path: `/api/videos/${returnedFile}`, quality });
       } else {
-        throw new Error('影片下載失敗');
+        throw new Error('影片下載失敗，請確認連結是否有效或嘗試其他畫質');
       }
     }
   } catch (error) {
     console.error('Download error:', error.message);
-    res.status(500).json({ error: `下載失敗: ${error.message}` });
+    const friendly = error.message.includes('yt-dlp') ? error.message
+      : error.message.includes('429') ? '下載次數過多，請稍後再試'
+      : error.message.includes('Private') || error.message.includes('private') ? '此影片為私人內容，請確認登入狀態'
+      : `下載失敗: ${error.message.split('\n')[0]}`;
+    res.status(500).json({ error: friendly });
   }
 });
+
+// ─── IG Cookie 設定 API ───────────────────────────────────────
+// (igCookie 欄位沿用 settings 機制，在此提供路由供 frontend 存取)
+// igCookie 已自動合併到 /api/settings POST，不需額外路由
 
 // ─── Serve Videos ────────────────────────────────────────────
 app.use('/api/videos', express.static(VIDEOS_DIR));

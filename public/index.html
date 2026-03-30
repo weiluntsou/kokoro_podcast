@@ -163,24 +163,37 @@
             <div class="icon green">📥</div>
             <div>
               <h3>影片下載器</h3>
-              <p>直接貼入連結下載影片並播放</p>
+              <p>支援 X、Instagram、YouTube 等平台</p>
             </div>
           </div>
           <div class="download-section">
-            <input type="url" id="downloadUrl" placeholder="貼入任何影片連結..." />
-            <button type="button" class="btn btn-secondary btn-icon" title="貼上剪貼簿" onclick="pasteFromClipboard('downloadUrl')" style="flex-shrink:0;">
+            <input type="url" id="downloadUrl" placeholder="貼入 X / Instagram / YouTube 連結..." oninput="onDownloadUrlInput(this.value)" />
+            <button type="button" class="btn btn-secondary btn-icon" title="貼上剪貼簿" onclick="pasteAndDetect()" style="flex-shrink:0;">
               📋
             </button>
-            <button class="btn btn-secondary" id="btnDirectDownload" onclick="enqueueDirectDownload()"
-              style="width:100px;">
-              ⬇️ 下載
-            </button>
-            <button class="btn btn-secondary btn-icon" id="btnPlayDirect" onclick="playDirectVideo()"
-              style="display:none" title="播放影片">
-              ▶️
-            </button>
           </div>
-          
+          <!-- Platform badge + quality -->
+          <div style="display:flex; gap:10px; align-items:center; margin-top:10px; flex-wrap:wrap;">
+            <span id="dlPlatformBadge" style="display:none; font-size:12px; padding:3px 10px; border-radius:12px; font-weight:600;"></span>
+            <div style="display:flex; align-items:center; gap:8px; margin-left:auto;">
+              <label style="font-size:13px; color:var(--text-secondary); white-space:nowrap;">🎬 畫質</label>
+              <select id="downloadQuality" class="form-control" style="width:110px; font-size:13px;">
+                <option value="best">最佳畫質</option>
+                <option value="1080">1080p</option>
+                <option value="720">720p</option>
+                <option value="480">480p</option>
+                <option value="360">360p</option>
+              </select>
+              <button class="btn btn-primary" id="btnDirectDownload" onclick="enqueueDirectDownload()" style="white-space:nowrap;">
+                ⬇️ 下載
+              </button>
+              <button class="btn btn-secondary btn-icon" id="btnPlayDirect" onclick="playDirectVideo()"
+                style="display:none" title="播放影片">
+                ▶️
+              </button>
+            </div>
+          </div>
+
           <div id="videoActionContainer" style="display:none; margin-top:15px; text-align:right;">
              <button class="btn btn-primary" onclick="enqueueVideoToNote()">
                📝 將此影片轉為筆記
@@ -516,6 +529,14 @@
             <div class="input-group">
               <label>Cookie 字串（用於 xfetch 認證）</label>
               <textarea id="settingXCookie" rows="3" placeholder="ct0=xxx; auth_token=xxx; ..."></textarea>
+            </div>
+          </div>
+
+          <div class="settings-group" style="grid-column: 1 / -1">
+            <h4><span class="icon">📸</span> Instagram Cookie <span style="font-size:11px; font-weight:400; color:var(--text-muted); margin-left:6px;">(選填，用於下載私人 IG 影片)</span></h4>
+            <div class="input-group">
+              <label>Cookie 字串（從瀏覽器 devtools 取得，格式同 X Cookie）</label>
+              <textarea id="settingIgCookie" rows="3" placeholder="sessionid=xxx; csrftoken=xxx; ..."></textarea>
             </div>
           </div>
         </div>
