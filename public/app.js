@@ -318,6 +318,10 @@ async function pasteFromClipboard(targetId = 'postUrl') {
                 showToast('已從剪貼簿貼上', 'success');
                 // Manually trigger an input event for better compatibility
                 input.dispatchEvent(new Event('input', { bubbles: true }));
+                // 自動加入處理列表
+                if (targetId === 'postUrl') {
+                    enqueueProcessPost();
+                }
             }
         } else if (text === '') {
             showToast('剪貼簿目前沒有文字', 'info');
