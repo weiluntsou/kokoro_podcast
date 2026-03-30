@@ -5,6 +5,7 @@ const fs = require('fs');
 const { execSync, exec } = require('child_process');
 const fetch = require('node-fetch');
 const FormData = require('form-data');
+const multer = require('multer');
 
 const app = express();
 const PORT = 3777;
@@ -20,8 +21,9 @@ const AUDIO_DIR = path.join(DATA_DIR, 'audio');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 const NOTES_FILE = path.join(DATA_DIR, 'notes.json');
 const PODCASTS_FILE = path.join(DATA_DIR, 'podcasts.json');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 
-[DATA_DIR, VIDEOS_DIR, AUDIO_DIR].forEach(dir => {
+[DATA_DIR, VIDEOS_DIR, AUDIO_DIR, UPLOADS_DIR].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -1936,6 +1938,61 @@ ${sourceList}
     res.status(500).json({ error: error.message });
   }
 });
+
+// ─── File Management ──────────────────────────────────────────
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOADS_DIR),
+  filename: (req, file, cb) => {
+    // try fixing character encoding issues with originalname
+    const origName = Buffer.from(file.originalname, 'latin1').toString('utf8');
+    cb(null, origName);
+  }
+});
+const upload = multer({ storage });
+
+app.post('/api/files/upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ success: false, error: '未上傳任何檔案' });
+  res.json({ success: true, message: '檔案上傳成功', filename: req.file.filename });
+});
+
+app.get('/api/files/list', (req, res) => {
+  try {
+    const files = fs.readdirSync(UPLOADS_DIR)
+      .filter(f => !f.startsWith('.'))
+      .map(f => {
+        const stats = fs.statSync(path.join(UPLOADS_DIR, f));
+        return {
+          filename: f,
+          url: `/api/files/download/${encodeURIComponent(f)}`,
+          size: stats.size,
+          createdAt: stats.mtime
+        };
+    }).sort((a, b) => b.createdAt - a.createdAt);
+    res.json({ success: true, files });
+  } catch(e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.delete('/api/files/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    // basic sanitization
+    if (filename.includes('/') || filename.includes('\\')) throw new Error('Invalid filename');
+    
+    const filePath = path.join(UPLOADS_DIR, filename);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ success: false, error: '找不到檔案' });
+    }
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+app.use('/api/files/download', express.static(UPLOADS_DIR));
 
 // ─── Fallback to SPA ─────────────────────────────────────────
 app.get('/{*splat}', (req, res) => {

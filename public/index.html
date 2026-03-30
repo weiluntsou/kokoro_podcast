@@ -39,6 +39,10 @@
         🔍
         <span class="tooltip">知識庫</span>
       </button>
+      <button class="nav-btn" data-page="files" id="nav-files" onclick="switchPage('files')">
+        📁
+        <span class="tooltip">檔案管理</span>
+      </button>
       <button class="nav-btn" data-page="settings" id="nav-settings" onclick="switchPage('settings')"
         style="margin-top:auto">
         ⚙️
@@ -449,6 +453,49 @@
             </h4>
             <div id="ragSources" class="source-list">
                <!-- Sources will be injected here -->
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Files                                    -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-files" class="page">
+        <div class="page-header">
+          <h1>📁 檔案管理</h1>
+          <p>簡單的上傳、下載、與刪除檔案</p>
+        </div>
+        
+        <div class="card">
+          <div class="card-header">
+            <div class="icon green">⬆️</div>
+            <div>
+              <h3>上傳檔案</h3>
+              <p>請選擇你要上傳的檔案</p>
+            </div>
+          </div>
+          <div class="input-row" style="margin-top: 15px;">
+            <input type="file" id="fileInput" style="flex: 1; padding: 10px; border: 1px dashed var(--border); border-radius: 8px; background: var(--bg-input);" />
+            <button class="btn btn-primary" id="btnUploadFile" onclick="uploadFile()">
+              <span>🚀 上傳</span>
+            </button>
+          </div>
+        </div>
+        
+        <div class="card">
+          <div class="card-header">
+            <div class="icon blue">📂</div>
+            <div>
+              <h3>已上傳檔案列表</h3>
+              <p>點擊下載或刪除檔案</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="loadFilesList()" style="margin-left:auto">🔄 重新整理</button>
+          </div>
+          <div id="filesList">
+            <div class="empty-state" style="padding:20px">
+              <div class="icon">📭</div>
+              <p>暫無檔案，在上方上傳第一個檔案吧！</p>
             </div>
           </div>
         </div>

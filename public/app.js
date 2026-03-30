@@ -56,6 +56,9 @@ function switchPage(page) {
     if (page === 'video') {
         loadVideosList();
     }
+    if (page === 'files') {
+        loadFilesList();
+    }
 }
 
 // ─── Toast Notifications ──────────────────────────────
@@ -1400,5 +1403,98 @@ async function exportSocialToHedgedoc() {
         }
     } catch (e) {
         showToast(`轉存失敗: ${e.message}`, 'error');
+    }
+}
+
+// ─── File Management ────────────────────────────────────
+async function uploadFile() {
+    const fileInput = document.getElementById('fileInput');
+    const file = fileInput.files[0];
+    if (!file) {
+        showToast('請先選擇一個檔案', 'error');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const btn = document.getElementById('btnUploadFile');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = `<span class="spinner" style="display:inline-block; width:14px; height:14px; border:2px solid #fff; border-top-color:transparent; border-radius:50%; animation:spin 1s linear infinite; margin-right:8px;"></span>上傳中...`;
+    btn.disabled = true;
+    
+    try {
+        const res = await fetch(`${API}/api/files/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('檔案上傳成功', 'success');
+            fileInput.value = ''; // clear input
+            loadFilesList();
+        } else {
+            throw new Error(data.error || '上傳失敗');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
+
+async function loadFilesList() {
+    const listEl = document.getElementById('filesList');
+    if (!listEl) return;
+    try {
+        const res = await fetch(`${API}/api/files/list`);
+        const data = await res.json();
+        
+        if (!data.success) throw new Error(data.error || '無法載入檔案列表');
+        
+        if (data.files.length === 0) {
+            listEl.innerHTML = `<div class="empty-state" style="padding:20px"><div class="icon">📭</div><p>暫無檔案，在上方上傳第一個檔案吧！</p></div>`;
+            return;
+        }
+        
+        listEl.innerHTML = data.files.map(f => `
+            <div class="podcast-item" style="display:flex; justify-content:space-between; align-items:center; padding: 12px; border-bottom: 1px solid var(--border);">
+              <div style="flex:1; overflow:hidden;">
+                <h4 style="margin:0 0 4px 0; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${f.filename}">${f.filename}</h4>
+                <div style="font-size:12px; color:var(--text-muted); display:flex; gap:10px;">
+                  <span>📅 ${(new Date(f.createdAt)).toLocaleDateString('zh-TW')}</span>
+                  <span>📦 ${(f.size / 1024 / 1024).toFixed(2)} MB</span>
+                </div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <a href="${API}${f.url}" download class="btn btn-secondary btn-sm" title="下載檔案">⬇️</a>
+                <button class="btn btn-danger btn-sm" onclick="deleteFile('${f.filename}')" title="刪除檔案">🗑️</button>
+              </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        listEl.innerHTML = `<div style="padding:20px; color:var(--danger); text-align:center;">載入失敗: ${e.message}</div>`;
+    }
+}
+
+async function deleteFile(filename) {
+    if (!confirm(`確定要刪除「${filename}」嗎？此操作無法還原。`)) return;
+    
+    try {
+        const res = await fetch(`${API}/api/files/${encodeURIComponent(filename)}`, {
+             method: 'DELETE'
+        });
+        const data = await res.json();
+        
+        if (data.success) {
+            showToast('檔案已刪除', 'success');
+            loadFilesList();
+        } else {
+            throw new Error(data.error || '刪除失敗');
+        }
+    } catch (e) {
+        showToast(e.message, 'error');
     }
 }
