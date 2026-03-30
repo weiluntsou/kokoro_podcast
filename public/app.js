@@ -201,39 +201,69 @@ const TaskQueue = {
 
     async addProcessTask(url) {
         if (!url) return;
-        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'process', name: '處理貼文...', data: {url}}) });
-        this.fetchQueue();
-        showToast('已加入處理佇列', 'success');
+        try {
+            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'process', name: '處理貼文...', data: {url}}) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await this.fetchQueue();
+            showToast('已加入處理佇列', 'success');
+        } catch(e) {
+            console.error('addProcessTask error:', e);
+            showToast(`加入失敗：伺服器無回應，請確認伺服器是否已啟動`, 'error');
+        }
     },
 
     async addPodcastTask(noteIdsArray, notesData, title, language = 'zh') {
         const name = `Podcast: ${title.substring(0, 20)}...`;
-        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'podcast', name, data: {noteIds: noteIdsArray, title, language}}) });
-        this.fetchQueue();
-        showToast('已加入 Podcast 佇列', 'success');
+        try {
+            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'podcast', name, data: {noteIds: noteIdsArray, title, language}}) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await this.fetchQueue();
+            showToast('已加入 Podcast 佇列', 'success');
+        } catch(e) {
+            console.error('addPodcastTask error:', e);
+            showToast(`加入失敗：伺服器無回應，請確認伺服器是否已啟動`, 'error');
+        }
     },
 
     async addDownloadTask(url) {
         if (!url) return;
         const name = `下載: ${url.substring(0, 30)}...`;
-        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'download', name, data: {url}}) });
-        this.fetchQueue();
-        showToast('已加入下載佇列', 'success');
+        try {
+            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'download', name, data: {url}}) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await this.fetchQueue();
+            showToast('已加入下載佇列', 'success');
+        } catch(e) {
+            console.error('addDownloadTask error:', e);
+            showToast(`加入失敗：伺服器無回應，請確認伺服器是否已啟動`, 'error');
+        }
     },
 
     async addDirectDownloadTask(url) {
         if (!url) { showToast('請輸入連結', 'error'); return; }
         const name = `直接下載: ${url.substring(0, 30)}...`;
-        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'direct-download', name, data: {url}}) });
-        this.fetchQueue();
-        showToast('已加入下載佇列', 'success');
+        try {
+            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'direct-download', name, data: {url}}) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await this.fetchQueue();
+            showToast('已加入下載佇列', 'success');
+        } catch(e) {
+            console.error('addDirectDownloadTask error:', e);
+            showToast(`加入失敗：伺服器無回應，請確認伺服器是否已啟動`, 'error');
+        }
     },
 
     async addVideoNoteTask() {
         if (!currentDirectVideoFilename) return;
-        await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'video-note', name: '影片轉筆記', data: {filename: currentDirectVideoFilename, url: currentDirectVideoUrl}}) });
-        this.fetchQueue();
-        showToast('已加入影片轉筆記佇列', 'success');
+        try {
+            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'video-note', name: '影片轉筆記', data: {filename: currentDirectVideoFilename, url: currentDirectVideoUrl}}) });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            await this.fetchQueue();
+            showToast('已加入影片轉筆記佇列', 'success');
+        } catch(e) {
+            console.error('addVideoNoteTask error:', e);
+            showToast(`加入失敗：伺服器無回應，請確認伺服器是否已啟動`, 'error');
+        }
     },
 
     async clearDone() {
