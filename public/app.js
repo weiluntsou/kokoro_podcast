@@ -236,10 +236,11 @@ const TaskQueue = {
         } catch(e) {}
     },
 
-    async addProcessTask(url) {
+    async addProcessTask(url, platformLabel = '') {
         if (!url) return;
+        const taskName = platformLabel ? `處理${platformLabel}...` : '處理連結...';
         try {
-            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'process', name: '處理貼文...', data: {url}}) });
+            const res = await fetch(`${API}/api/tasks/add`, { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({type: 'process', name: taskName, data: {url}}) });
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             await this.fetchQueue();
             showToast('已加入處理佇列', 'success');
@@ -409,18 +410,28 @@ async function pasteFromClipboard(targetId = 'postUrl') {
 
 
 
+function detectInputUrlType(url) {
+    if (!url) return null;
+    if (/(?:x\.com|twitter\.com)\/\w+\/(?:status|article)\/\d+/i.test(url)) return { type: 'x', label: 'X 貼文' };
+    if (/(?:x\.com|twitter\.com)\/i\/article\/\d+/i.test(url)) return { type: 'x', label: 'X 文章' };
+    if (/threads\.net/i.test(url)) return { type: 'threads', label: 'Threads 貼文' };
+    if (/^https?:\/\//i.test(url)) return { type: 'web', label: '網頁' };
+    return null;
+}
+
 function enqueueProcessPost() {
     const url = document.getElementById('postUrl').value.trim();
     if (!url) {
-        showToast('請輸入 X 貼文連結', 'error');
+        showToast('請輸入連結', 'error');
         return;
     }
-    if (!url.match(/https?:\/\/(x\.com|twitter\.com)\/\w+\/status\/\d+/i)) {
-        showToast('請輸入有效的 X 貼文連結', 'error');
+    const detected = detectInputUrlType(url);
+    if (!detected) {
+        showToast('請輸入有效的網址（支援 X、Threads、Blog、新聞網頁等）', 'error');
         return;
     }
 
-    TaskQueue.addProcessTask(url);
+    TaskQueue.addProcessTask(url, detected.label);
     document.getElementById('postUrl').value = '';
 }
 

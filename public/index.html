@@ -4,8 +4,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-  <meta name="description" content="X Post Processor — 處理 X 貼文為中文筆記，生成 Podcast">
-  <title>X Post Processor</title>
+  <meta name="description" content="X Post & Web Content Processor — 處理 X 貼文、Threads、Blog、新聞為中文筆記，生成 Podcast">
+  <title>Smart Note Processor</title>
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -14,7 +14,7 @@
   <div id="app">
     <!-- Sidebar Navigation -->
     <nav class="sidebar">
-      <div class="sidebar-logo">X</div>
+      <div class="sidebar-logo">📝</div>
       <button class="nav-btn active" data-page="process" id="nav-process" onclick="switchPage('process')">
         📝
         <span class="tooltip">處理貼文</span>
@@ -57,8 +57,8 @@
       <!-- ═══════════════════════════════════════════════ -->
       <div id="page-process" class="page active">
         <div class="page-header">
-          <h1>處理 X 貼文</h1>
-          <p>貼上 X 貼文連結，自動解析內容並生成中文筆記</p>
+          <h1>處理網頁內容</h1>
+          <p>貼上連結，自動解析內容並生成中文筆記（支援 X、Threads、Blog、新聞等）</p>
         </div>
 
         <!-- URL Input -->
@@ -66,12 +66,12 @@
           <div class="card-header">
             <div class="icon purple">🔗</div>
             <div>
-              <h3>貼文連結</h3>
-              <p>支援 x.com / twitter.com 連結</p>
+              <h3>貼上連結</h3>
+              <p>支援 X / Threads / Blog / 新聞網頁</p>
             </div>
           </div>
           <div class="input-row">
-            <input type="url" id="postUrl" placeholder="https://x.com/user/status/1234567890..." />
+            <input type="url" id="postUrl" placeholder="貼上 X / Threads / Blog / 新聞連結..." />
             <button type="button" class="btn btn-secondary btn-icon" title="貼上剪貼簿" onclick="pasteFromClipboard()" style="flex-shrink:0;">
               📋
             </button>

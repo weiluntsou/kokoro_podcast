@@ -114,9 +114,43 @@ function formatOriginalText(text) {
     .trim().split('\n').map(l => l.trim() ? `> ${l.trim()}` : '>').join('\n');
 }
 
+function formatOriginalWebText(text) {
+  if (!text) return '';
+  return text
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .trim().split('\n').map(l => l.trim() ? `> ${l.trim()}` : '>').join('\n');
+}
+
+// ─── URL Type Detection ──────────────────────────────────────
+function detectUrlType(url) {
+  if (!url) return 'unknown';
+  if (/(?:x\.com|twitter\.com)\/\w+\/(?:status|article)\/\d+/i.test(url)) return 'x';
+  if (/(?:x\.com|twitter\.com)\/i\/article\/\d+/i.test(url)) return 'x';
+  if (/threads\.net/i.test(url)) return 'threads';
+  // Generic web pages (blogs, news, etc.)
+  if (/^https?:\/\//i.test(url)) return 'web';
+  return 'unknown';
+}
+
 async function processPostWorker(task) {
   const { url } = task.data;
-  updateServerTask(task.id, '解析貼文中...');
+  const urlType = detectUrlType(url);
+
+  if (urlType === 'x') {
+    // ── X (Twitter) post flow ──
+    await processXPostWorker(task);
+  } else if (urlType === 'threads' || urlType === 'web') {
+    // ── Threads / Blog / News flow ──
+    await processWebPageWorker(task);
+  } else {
+    throw new Error('不支援的 URL 格式');
+  }
+}
+
+async function processXPostWorker(task) {
+  const { url } = task.data;
+  updateServerTask(task.id, '解析 X 貼文中...');
   const parseData = await internalFetch('/api/x/parse', { url });
   const currentTweet = parseData.tweet;
 
@@ -149,6 +183,45 @@ async function processPostWorker(task) {
 
   updateServerTask(task.id, '儲存至 HedgeDoc...');
   const noteTitle = currentTweet.articleTitle || `X 貼文筆記 - @${currentTweet.author || 'unknown'} - ${new Date().toLocaleDateString('zh-TW')}`;
+  const hdResult = await internalFetch('/api/hedgedoc/create', { content: finalNoteContent, title: noteTitle, sourceUrl: url });
+  
+  if (hdResult && hdResult.note && hdResult.note.url) {
+    task.data = task.data || {};
+    task.data.noteUrl = hdResult.note.url;
+  }
+}
+
+async function processWebPageWorker(task) {
+  const { url } = task.data;
+  const isThreads = /threads\.net/i.test(url);
+  updateServerTask(task.id, isThreads ? '解析 Threads 貼文中...' : '解析網頁內容中...');
+  
+  const parseData = await internalFetch('/api/web/parse', { url });
+  const page = parseData.page;
+
+  let contentForNote = '';
+  if (page.title) contentForNote += `標題：${page.title}\n\n`;
+  if (page.author) contentForNote += `作者：${page.author}\n\n`;
+  if (page.description) contentForNote += `摘要：${page.description}\n\n`;
+  if (page.text) contentForNote += `內文：\n${page.text}`;
+
+  if (!contentForNote.trim()) {
+    throw new Error('無法從網頁擷取到有效內容');
+  }
+
+  updateServerTask(task.id, '生成中文筆記中...');
+  const noteData = await internalFetch('/api/gemini/summarize', { content: contentForNote });
+
+  const authorInfo = page.author ? `- **作者：** ${page.author}\n` : '';
+  const siteInfo = page.siteName ? `- **網站：** ${page.siteName}\n` : '';
+  const pubDateInfo = page.publishedDate ? `- **發佈日期：** ${page.publishedDate}\n` : '';
+  const formattedOriginal = formatOriginalWebText(page.text);
+  const originalTextInfo = formattedOriginal ? `\n**原始內容：**\n\n${formattedOriginal}` : '';
+  const platformLabel = isThreads ? 'Threads 貼文' : (page.siteName || '網頁');
+  const finalNoteContent = `${noteData.text}\n\n---\n\n### 原始來源與內容\n\n- **來源連結：** ${url}\n- **來源平台：** ${platformLabel}\n${authorInfo}${siteInfo}${pubDateInfo}${originalTextInfo}`;
+
+  updateServerTask(task.id, '儲存至 HedgeDoc...');
+  const noteTitle = page.title || `${platformLabel}筆記 - ${new Date().toLocaleDateString('zh-TW')}`;
   const hdResult = await internalFetch('/api/hedgedoc/create', { content: finalNoteContent, title: noteTitle, sourceUrl: url });
   
   if (hdResult && hdResult.note && hdResult.note.url) {
@@ -918,6 +991,265 @@ app.post('/api/x/parse', async (req, res) => {
         parseError: error.message
       }
     });
+  }
+});
+
+// ─── Generic Web Page Parse (Threads / Blog / News) ──────────
+app.post('/api/web/parse', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: '缺少 URL' });
+
+    console.log(`[web/parse] Parsing URL: ${url}`);
+    const isThreads = /threads\.net/i.test(url);
+
+    let pageTitle = '';
+    let pageAuthor = '';
+    let pageDescription = '';
+    let pageText = '';
+    let pageSiteName = '';
+    let pagePublishedDate = '';
+
+    // ─── Threads: try specific approach first ───
+    if (isThreads) {
+      // Try fetching with a mobile UA for better Threads scraping
+      try {
+        const threadsRes = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+          },
+          redirect: 'follow',
+          timeout: 20000
+        });
+
+        if (threadsRes.ok) {
+          const html = await threadsRes.text();
+
+          // Extract from meta tags (Threads embeds content in OG)
+          const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i);
+          const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i);
+          const ogSite = html.match(/<meta[^>]*property=["']og:site_name["'][^>]*content=["']([^"']*)["']/i);
+          const titleTag = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+
+          if (ogTitle) pageTitle = ogTitle[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          if (ogDesc) pageDescription = ogDesc[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+          if (ogSite) pageSiteName = ogSite[1];
+          if (!pageSiteName) pageSiteName = 'Threads';
+
+          // Try to extract author from title (Threads format: "@user on Threads")
+          if (pageTitle) {
+            const authorMatch = pageTitle.match(/^@?(\S+)\s+(?:on|在)\s*Threads/i);
+            if (authorMatch) pageAuthor = `@${authorMatch[1]}`;
+          }
+
+          // Extract from JSON-LD structured data
+          const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+          for (const m of jsonLdMatches) {
+            try {
+              const ld = JSON.parse(m[1]);
+              if (ld.articleBody) pageText = ld.articleBody;
+              if (ld.text) pageText = ld.text;
+              if (ld.description && !pageDescription) pageDescription = ld.description;
+              if (ld.author) {
+                const author = typeof ld.author === 'string' ? ld.author : (ld.author.name || ld.author.identifier || '');
+                if (author) pageAuthor = author;
+              }
+              if (ld.datePublished) pagePublishedDate = ld.datePublished;
+            } catch {}
+          }
+
+          // If still no text, use description as fallback
+          if (!pageText && pageDescription) {
+            pageText = pageDescription;
+          }
+
+          // Extract from page content as last resort
+          if (!pageText) {
+            // Try to get text from the main content area
+            let bodyText = html
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+              .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+              .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+              .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+              .replace(/<[^>]*>/g, ' ')
+              .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+              .replace(/\s+/g, ' ')
+              .trim();
+            if (bodyText.length > 50) {
+              pageText = bodyText.substring(0, 5000);
+            }
+          }
+
+          console.log(`[web/parse] Threads parse: title="${pageTitle}", author="${pageAuthor}", textLen=${pageText.length}`);
+        }
+      } catch (e) {
+        console.log(`[web/parse] Threads fetch error: ${e.message}`);
+      }
+    }
+
+    // ─── Generic Web Page parsing ───
+    if (!pageText) {
+      try {
+        const pageRes = await fetch(url, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'zh-TW,zh;q=0.9,en-US;q=0.8,en;q=0.7'
+          },
+          redirect: 'follow',
+          timeout: 20000
+        });
+
+        if (!pageRes.ok) {
+          throw new Error(`HTTP ${pageRes.status}`);
+        }
+
+        const contentType = pageRes.headers.get('content-type') || '';
+        if (!contentType.includes('text/html') && !contentType.includes('application/xhtml')) {
+          throw new Error('此 URL 不是 HTML 網頁');
+        }
+
+        const html = await pageRes.text();
+
+        // ── Extract metadata ──
+        const ogTitle = html.match(/<meta[^>]*property=["']og:title["'][^>]*content=["']([^"']*)["']/i);
+        const ogDesc = html.match(/<meta[^>]*property=["']og:description["'][^>]*content=["']([^"']*)["']/i);
+        const ogSite = html.match(/<meta[^>]*property=["']og:site_name["'][^>]*content=["']([^"']*)["']/i);
+        const metaDesc = html.match(/<meta[^>]*name=["']description["'][^>]*content=["']([^"']*)["']/i);
+        const metaAuthor = html.match(/<meta[^>]*name=["']author["'][^>]*content=["']([^"']*)["']/i);
+        const titleTag = html.match(/<title[^>]*>([^<]*)<\/title>/i);
+        const articleDatePub = html.match(/<meta[^>]*(?:property=["']article:published_time["']|name=["']publish[_-]?date["'])[^>]*content=["']([^"']*)["']/i);
+
+        pageTitle = (ogTitle ? ogTitle[1] : (titleTag ? titleTag[1] : '')).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim();
+        pageDescription = (ogDesc ? ogDesc[1] : (metaDesc ? metaDesc[1] : '')).replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim();
+        if (ogSite) pageSiteName = ogSite[1].trim();
+        if (metaAuthor) pageAuthor = metaAuthor[1].trim();
+        if (articleDatePub) pagePublishedDate = articleDatePub[1].trim();
+
+        // ── Extract from JSON-LD structured data ──
+        const jsonLdMatches = html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi);
+        for (const m of jsonLdMatches) {
+          try {
+            let ld = JSON.parse(m[1]);
+            // Handle @graph arrays
+            if (ld['@graph']) ld = ld['@graph'].find(item => item['@type'] === 'Article' || item['@type'] === 'NewsArticle' || item['@type'] === 'BlogPosting') || ld;
+            if (ld.articleBody && ld.articleBody.length > (pageText?.length || 0)) {
+              pageText = ld.articleBody;
+            }
+            if (ld.text && ld.text.length > (pageText?.length || 0)) {
+              pageText = ld.text;
+            }
+            if (ld.headline && !pageTitle) pageTitle = ld.headline;
+            if (ld.author && !pageAuthor) {
+              const author = typeof ld.author === 'string' ? ld.author : (Array.isArray(ld.author) ? ld.author.map(a => a.name || a).join(', ') : (ld.author.name || ''));
+              if (author) pageAuthor = author;
+            }
+            if (ld.datePublished && !pagePublishedDate) pagePublishedDate = ld.datePublished;
+            if (ld.publisher && ld.publisher.name && !pageSiteName) pageSiteName = ld.publisher.name;
+          } catch {}
+        }
+
+        // ── Extract article text from HTML ──
+        if (!pageText || pageText.length < 100) {
+          // Strategy 1: Try <article> tag
+          const articleMatch = html.match(/<article[^>]*>([\s\S]*?)<\/article>/i);
+          // Strategy 2: Try main content area
+          const mainMatch = html.match(/<main[^>]*>([\s\S]*?)<\/main>/i);
+          // Strategy 3: Try common content selectors via class/id patterns
+          const contentMatch = html.match(/<div[^>]*(?:class|id)=["'][^"']*(?:article|content|post|entry|story|body)[^"']*["'][^>]*>([\s\S]*?)<\/div>/i);
+
+          let rawContent = '';
+          if (articleMatch) {
+            rawContent = articleMatch[1];
+          } else if (mainMatch) {
+            rawContent = mainMatch[1];
+          } else if (contentMatch) {
+            rawContent = contentMatch[1];
+          }
+
+          if (rawContent) {
+            // Extract text from HTML
+            let extractedText = rawContent
+              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+              .replace(/<figure[^>]*>[\s\S]*?<\/figure>/gi, '') // remove figures
+              .replace(/<br\s*\/?>/gi, '\n')
+              .replace(/<\/p>/gi, '\n\n')
+              .replace(/<\/h[1-6]>/gi, '\n\n')
+              .replace(/<\/li>/gi, '\n')
+              .replace(/<li[^>]*>/gi, '- ')
+              .replace(/<\/blockquote>/gi, '\n')
+              .replace(/<blockquote[^>]*>/gi, '> ')
+              .replace(/<[^>]*>/g, '')
+              .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+              .replace(/\n{3,}/g, '\n\n')
+              .trim();
+
+            if (extractedText.length > (pageText?.length || 0)) {
+              pageText = extractedText;
+            }
+          }
+        }
+
+        // ── Fallback: full body text extraction ──
+        if (!pageText || pageText.length < 100) {
+          let bodyText = html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+            .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+            .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+            .replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
+            .replace(/<br\s*\/?>/gi, '\n')
+            .replace(/<\/p>/gi, '\n\n')
+            .replace(/<\/h[1-6]>/gi, '\n\n')
+            .replace(/<[^>]*>/g, ' ')
+            .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+          if (bodyText.length > (pageText?.length || 0) && bodyText.length > 50) {
+            pageText = bodyText;
+          }
+        }
+
+        // ── Limit text length to avoid LLM overload ──
+        if (pageText && pageText.length > 8000) {
+          pageText = pageText.substring(0, 8000) + '\n\n[... 內容已截斷 ...]';
+        }
+
+        // ── Infer site name from URL if missing ──
+        if (!pageSiteName) {
+          try {
+            const hostname = new URL(url).hostname.replace(/^www\./, '');
+            pageSiteName = hostname;
+          } catch {}
+        }
+
+        console.log(`[web/parse] Generic parse: title="${pageTitle}", author="${pageAuthor}", site="${pageSiteName}", textLen=${(pageText || '').length}`);
+      } catch (e) {
+        console.error(`[web/parse] Fetch error: ${e.message}`);
+        throw new Error(`網頁擷取失敗: ${e.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      page: {
+        title: pageTitle || '',
+        author: pageAuthor || '',
+        description: pageDescription || '',
+        text: pageText || '',
+        siteName: pageSiteName || '',
+        publishedDate: pagePublishedDate || '',
+        url
+      }
+    });
+  } catch (error) {
+    console.error('[web/parse] Error:', error.message);
+    res.status(500).json({ error: `網頁解析失敗: ${error.message}` });
   }
 });
 
