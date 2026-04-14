@@ -1656,9 +1656,9 @@ app.post('/api/podcast/generate-script', async (req, res) => {
     const numMinutes = minutes || 5;
     const targetWordCount = numMinutes * 200;
     
-    // 中文內容長度加倍
-    const cnMinutes = numMinutes * 2;
-    const cnWordCount = targetWordCount * 2;
+    // 中文內容長度加倍 (改為 4 倍)
+    const cnMinutes = numMinutes * 4;
+    const cnWordCount = targetWordCount * 4;
 
     const subPrompt = isEnglish
       ? `Please adapt the following content into a ${numMinutes}-minute two-host podcast script in English.
@@ -1666,8 +1666,8 @@ Hosts are Bella (host_f, female, curious and lively) and Eric (host_m, male, gro
 Make the conversation sound natural, engaging, and suitable for a ${numMinutes}-minute audio!
 IMPORTANT: A normal speaking rate is about 200 words per minute. To hit the ${numMinutes}-minute mark, your script MUST contain approximately ${targetWordCount} words in total across all dialogue. Please expand on the topics, add natural banter, examples, and deep dives to reach this length without sounding repetitive.`
       : `請將以下貼文內容改寫為長度約 ${cnMinutes} 分鐘的 Podcast 雙人對談腳本。
-主持人為建國 (host_f，男，提問與引導) 與雲健 (host_m，男，沉穩專業的分析)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。目標是深入探討主題，讓使用者聽完後產生獨到洞見與啟發。
-⚠️ 重要要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${cnMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${cnWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與探討，來擴充內容長度並提供深刻洞見，切忌空洞重複。`;
+主持人為建國 (host_f，男，提問與引導) 與雲健 (host_m，男，沉穩專業的分析)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。目標是深入探討主題，讓使用者聽完後產生獨到洞見與啟發。可以包含專有名詞的英文。
+⚠️ 長度要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${cnMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${cnWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與探討，來大幅擴充內容長度並提供深刻洞見，切忌空洞重複。`;
 
     const prompt = `${subPrompt}
 ⚠️ 嚴格輸出限制：你必須『只』使用純文字格式，絕對不要包含任何 JSON、陣列或寫程式碼的結構 (如 \`\`\`json )，也不要前言結語！
@@ -1758,22 +1758,45 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     let processedScript = [];
     scriptData.forEach(([speaker, text]) => {
       let finalSpeaker = speaker;
-      if (speaker === 'host_f') finalSpeaker = voiceF;
-      else if (speaker === 'host_m') finalSpeaker = voiceM;
+      let finalVoiceEng = 'am_michael'; // Default English counterpart for host_f
+
+      if (speaker === 'host_f') {
+        finalSpeaker = voiceF;
+        finalVoiceEng = voiceF === 'zm_yunxi' ? 'am_michael' : voiceF;
+      } else if (speaker === 'host_m') {
+        finalSpeaker = voiceM;
+        finalVoiceEng = voiceM === 'zm_yunjian' ? 'am_eric' : voiceM;
+      }
 
       // Split text by common punctuation to avoid PyTorch tensor size limits (usually >250-300 chars crashes Kokoro)
       const sentences = text.split(/(?<=[。！？；.!?;\n])\s*/).filter(s => s.trim().length > 0);
 
-      let currentChunk = '';
-      sentences.forEach(sentence => {
-        if (currentChunk.length + sentence.length > 200) {
-          if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
-          currentChunk = sentence;
-        } else {
-          currentChunk += (currentChunk ? ' ' : '') + sentence;
-        }
-      });
-      if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
+      if (language === 'en') {
+        let currentChunk = '';
+        sentences.forEach(sentence => {
+          if (currentChunk.length + sentence.length > 200) {
+            if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
+            currentChunk = sentence;
+          } else {
+            currentChunk += (currentChunk ? ' ' : '') + sentence;
+          }
+        });
+        if (currentChunk) processedScript.push([finalSpeaker, currentChunk]);
+      } else {
+        // 中文模式：遇到英文時切割並切換英文語音發聲
+        sentences.forEach(sentence => {
+          // 利用 Regex 切割中英文字串 (將字母、數字、其內部空白與橫/底線視為英文段落)
+          const parts = sentence.split(/([a-zA-Z0-9][a-zA-Z0-9\s\-_]*[a-zA-Z0-9]|[a-zA-Z0-9])/).filter(p => p.length > 0);
+          
+          parts.forEach(part => {
+             const isEnglish = /^[a-zA-Z0-9\s\-_]+$/.test(part);
+             const targetVoice = isEnglish ? finalVoiceEng : finalSpeaker;
+             if (part.trim().length > 0 || !isEnglish) {
+               processedScript.push([targetVoice, part]);
+             }
+          });
+        });
+      }
     });
 
     // Ensure we don't include /v1 or /generate_podcast in the base URL for these custom endpoints
