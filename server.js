@@ -1655,15 +1655,19 @@ app.post('/api/podcast/generate-script', async (req, res) => {
     const isEnglish = language === 'en';
     const numMinutes = minutes || 5;
     const targetWordCount = numMinutes * 200;
+    
+    // 中文內容長度加倍
+    const cnMinutes = numMinutes * 2;
+    const cnWordCount = targetWordCount * 2;
 
     const subPrompt = isEnglish
       ? `Please adapt the following content into a ${numMinutes}-minute two-host podcast script in English.
 Hosts are Bella (host_f, female, curious and lively) and Eric (host_m, male, grounded and professional).
 Make the conversation sound natural, engaging, and suitable for a ${numMinutes}-minute audio!
 IMPORTANT: A normal speaking rate is about 200 words per minute. To hit the ${numMinutes}-minute mark, your script MUST contain approximately ${targetWordCount} words in total across all dialogue. Please expand on the topics, add natural banter, examples, and deep dives to reach this length without sounding repetitive.`
-      : `請將以下貼文內容改寫為長度約 ${numMinutes} 分鐘的 Podcast 雙人對談腳本。
-主持人為曉曉 (host_f，女，活潑好奇) 與雲健 (host_m，男，沉穩專業)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。
-⚠️ 重要要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${numMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${targetWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與寒暄，來擴充內容長度，切忌空洞重複。`;
+      : `請將以下貼文內容改寫為長度約 ${cnMinutes} 分鐘的 Podcast 雙人對談腳本。
+主持人為建國 (host_f，男，提問與引導) 與雲健 (host_m，男，沉穩專業的分析)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。目標是深入探討主題，讓使用者聽完後產生獨到洞見與啟發。
+⚠️ 重要要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${cnMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${cnWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與探討，來擴充內容長度並提供深刻洞見，切忌空洞重複。`;
 
     const prompt = `${subPrompt}
 ⚠️ 嚴格輸出限制：你必須『只』使用純文字格式，絕對不要包含任何 JSON、陣列或寫程式碼的結構 (如 \`\`\`json )，也不要前言結語！
@@ -1741,7 +1745,8 @@ app.post('/api/podcast/generate-audio', async (req, res) => {
     }
 
     // 根據前端傳來的 language 參數決定語音模型 (不再自動偵測中文)
-    let voiceF = 'zf_xiaoxiao';
+    // 中文兩人皆使用男性聲音
+    let voiceF = 'zm_yunxi';
     let voiceM = 'zm_yunjian';
 
     if (language === 'en') {
