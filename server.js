@@ -1546,13 +1546,13 @@ app.post('/api/gemini/summarize', async (req, res) => {
     const settings = getSettings();
     if (!settings.geminiApiKey) return res.status(400).json({ error: '請先設定 Gemini API Key' });
 
-    const systemPrompt = `你是一位專業的筆記整理助手。你的任務是將使用者提供的原始內容直接整理成繁體中文筆記。
+    const summarizeInstructions = `你是一位專業的筆記整理助手。你的任務是將使用者提供的原始內容直接整理成繁體中文筆記。
 
 嚴格規則（必須遵守）：
 - 你必須直接輸出整理好的筆記，不可以回覆任何對話、提問或要求更多資訊
 - 不要說「請提供連結」或「請貼上內容」之類的話
 - 嚴禁捏造、幻想或編造任何不在原始內容中的資訊
-- 只能根據使用者提供的原始內容進行整理，不可以自行補充你認為可能的內容
+- 只能根據下方【原始內容】進行整理，不可以自行補充你認為可能的內容
 - 如果原始內容太少無法整理成有意義的筆記，就直接輸出：「⚠️ 原始內容不足，無法生成完整筆記。」並附上原始內容
 - ⚠️ 嚴格輸出限制：必須『只』輸出筆記內容，絕對不可以使用 markdown 的 code block（也就是不要用 \`\`\` 包起來）。
 
@@ -1568,20 +1568,19 @@ app.post('/api/gemini/summarize', async (req, res) => {
 
     const userPrompt = type === 'podcast'
       ? req.body.prompt
-      : `請將以下原始內容整理成繁體中文 Markdown 筆記：
+      : `【任務說明】
+${summarizeInstructions}
 
-${content}`;
+【原始內容】
+${content}
+
+請嚴格遵循【任務說明】，千萬不要把任務說明當成摘要的對象，也不要將其翻譯為英文。直接輸出針對上述【原始內容】整理出的繁體中文筆記：`;
 
     const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const requestBody = {
       contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
       generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
     };
-
-    // Use systemInstruction to separate role from content (prevents model from summarizing instructions)
-    if (type !== 'podcast') {
-      requestBody.systemInstruction = { parts: [{ text: systemPrompt }] };
-    }
 
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
@@ -1720,11 +1719,19 @@ Yes, exactly...`
 [host_m]
 沒錯...`;
 
-    const podcastUserPrompt = `內容標題：${noteTitle || '未命名'}
+    const podcastUserContent = `內容標題：${noteTitle || '未命名'}
 使用語言：${isEnglish ? 'English' : '繁體中文'}
 
 以下是需要改寫為 Podcast 腳本的內容：
 ${noteContents}`;
+
+    const prompt = `【任務說明】
+${podcastSystemPrompt}
+
+【原始內容】
+${podcastUserContent}
+
+請嚴格遵循【任務說明】，千萬不要把任務說明當成摘要或翻譯的對象。直接生成符合上述規則的 Podcast 腳本：`;
 
     const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const geminiRes = await fetch(
@@ -1733,8 +1740,7 @@ ${noteContents}`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: podcastSystemPrompt }] },
-          contents: [{ role: 'user', parts: [{ text: podcastUserPrompt }] }],
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
           generationConfig: { temperature: 0.8, maxOutputTokens: 8192 }
         })
       }
@@ -2302,9 +2308,15 @@ ${answer}
 可引用的原始來源資料（僅限以下清單）：
 ${sourceList}
 
-今天日期：${today}
+今天日期：${today}`;
 
-請直接輸出完整的 Threads 串文（每段用 --- 分隔，最後附 References 和 hashtag）：`;
+    const prompt = `【任務說明】
+${socialSystemPrompt}
+
+【原始內容】
+${socialUserPrompt}
+
+請嚴格遵循【任務說明】，千萬不要把任務說明當成摘要的對象，也不要將其翻譯為英文。直接輸出符合格式要求的 Threads 串文：`;
 
     const geminiModel = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${settings.geminiApiKey}`;
@@ -2313,8 +2325,7 @@ ${sourceList}
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        systemInstruction: { parts: [{ text: socialSystemPrompt }] },
-        contents: [{ role: 'user', parts: [{ text: socialUserPrompt }] }],
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: { temperature: 0.8, maxOutputTokens: 8192 }
       })
     });
