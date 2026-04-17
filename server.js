@@ -1546,35 +1546,34 @@ app.post('/api/gemini/summarize', async (req, res) => {
     const settings = getSettings();
     if (!settings.geminiApiKey) return res.status(400).json({ error: '請先設定 Gemini API Key' });
 
-    const summarizeInstructions = `你是一位專業的筆記整理助手。你的任務是將使用者提供的原始內容直接整理成繁體中文筆記。
+    const summarizeInstructions = `You are a professional note-taking assistant. Your task is to organize the provided raw content into structured Traditional Chinese (繁體中文) notes.
 
-嚴格規則（必須遵守）：
-- 你必須直接輸出整理好的筆記，不可以回覆任何對話、提問或要求更多資訊
-- 不要說「請提供連結」或「請貼上內容」之類的話
-- 嚴禁捏造、幻想或編造任何不在原始內容中的資訊
-- 只能根據下方【原始內容】進行整理，不可以自行補充你認為可能的內容
-- 如果原始內容太少無法整理成有意義的筆記，就直接輸出：「⚠️ 原始內容不足，無法生成完整筆記。」並附上原始內容
-- ⚠️ 嚴格輸出限制：必須『只』輸出筆記內容，絕對不可以使用 markdown 的 code block（也就是不要用 \`\`\` 包起來）。
+STRICT RULES (MUST FOLLOW):
+- Output ONLY the final organized notes. Do not include any conversational filler, greetings, or acknowledgements.
+- Do not ask for links or more content.
+- NO HALLUCINATION. Do not fabricate or invent any information not present in the raw content.
+- If the raw content is too short or meaningless to organize, output exactly ONLY this string: "⚠️ 原始內容不足，無法生成完整筆記。" followed by the original content.
+- ⚠️ STRICT OUTPUT RESTRICTION: You MUST NOT use markdown code blocks (\`\`\`) to wrap the response. Just output the raw markdown text directly to the response.
 
-格式要求：
-1. **非常重要**：筆記的最開頭第一行必須加上標籤，格式為：###### tags: \`標籤1\` \`標籤2\`（請根據內容自動生成 2-3 個相關的標籤）
-2. **非常重要**：第二行必須是一個主要大標題（格式為：# 標題內容），請根據內容自動總結出一個最適合的標題。
-3. 使用 Markdown 格式（如標題 ##、粗體 **、列表 -）來讓閱讀更清晰
-4. 包含重點摘要
-5. 列出關鍵要點
-6. 如果有技術內容，請適當解釋
-7. 保持簡潔但完整
-8. 語言使用繁體中文`;
+FORMAT PIPELINE:
+1. First line MUST be tags in this exact format: ###### tags: \`tag1\` \`tag2\` (generate 2-3 relevant tags)
+2. Second line MUST be the main title in this exact format: # [Title] (summarize a fitting title)
+3. Use Markdown formatting freely (## headers, **bold**, - lists) for readability.
+4. Include an executive summary.
+5. List the key takeaways.
+6. Provide technical explanations if applicable.
+7. Keep it concise but fully comprehensive.
+8. The entire output MUST be in Traditional Chinese (繁體中文).`;
 
     const userPrompt = type === 'podcast'
       ? req.body.prompt
-      : `【任務說明】
+      : `[TASK INSTRUCTIONS]
 ${summarizeInstructions}
 
-【原始內容】
+[RAW CONTENT]
 ${content}
 
-請嚴格遵循【任務說明】，千萬不要把任務說明當成摘要的對象，也不要將其翻譯為英文。直接輸出針對上述【原始內容】整理出的繁體中文筆記：`;
+Follow the [TASK INSTRUCTIONS] strictly. DO NOT translate the instructions or include them in your output. Output the final Traditional Chinese notes directly:`;
 
     const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const requestBody = {
@@ -1707,31 +1706,31 @@ Hello everyone...
 
 [host_m]
 Yes, exactly...`
-      : `你是一位 Podcast 腳本撰寫專家。請將使用者提供的內容改寫為長度約 ${cnMinutes} 分鐘的 Podcast 雙人對談腳本。
-主持人為建國 (host_f，男，提問與引導) 與雲健 (host_m，男，沉穩專業的分析)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。目標是深入探討主題，讓使用者聽完後產生獨到洞見與啟發。
-⚠️ 語言要求（非常重要）：講稿必須「完全使用中文」撰寫，嚴禁中英文混雜！所有英文專有名詞、技術術語、品牌名稱等，都必須翻譯或音譯為中文。例如：Machine Learning → 機器學習、Apple → 蘋果、API → 應用程式介面。不可以在中文句子中穿插任何英文單字。
-⚠️ 長度要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${cnMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${cnWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與探討，來大幅擴充內容長度並提供深刻洞見，切忌空洞重複。
-⚠️ 嚴格輸出限制：你必須『只』使用純文字格式，絕對不要包含任何 JSON、陣列或寫程式碼的結構 (如 \`\`\`json )，也不要前言結語！
-請使用以下固定格式，在每一句話的最前面加上發言人的標註：
+      : `You are an expert podcast scriptwriter. Rewrite the provided content into a ${cnMinutes}-minute two-host podcast script.
+The hosts are 建國 (host_f, male, asks questions and guides the flow) and 雲健 (host_m, male, calm and professional analysis). Inject Taiwanese colloquialisms (e.g., 喔, 吧, 對啊, 其實). The goal is to deeply explore the topic, providing unique insights and inspiration to the listener.
+⚠️ LANGUAGE REQUIREMENT (CRITICAL): The entire script MUST be written entirely in Traditional Chinese (繁體中文). NO mix of English! All English terminology, technical terms, and brand names must be translated or transliterated into Chinese (e.g., Machine Learning -> 機器學習, API -> 應用程式介面). DO NOT insert English words into the Chinese dialogue.
+⚠️ LENGTH REQUIREMENT: Average speaking rate is 200 words/min. To ensure ${cnMinutes} minutes of audio, your script MUST reach approximately ${cnWordCount} words in total. Use examples, hypothetical scenarios, deep dives, and natural banter to significantly expand the length without being repetitive or empty.
+⚠️ STRICT OUTPUT REQUIREMENT: Output ONLY plain text. NO JSON, NO arrays, NO markdown code blocks (\`\`\`). NO preamble or conclusion.
+Use exactly this format, prepending the speaker tag to every single line of dialogue:
 [host_f]
 大家好...
 
 [host_m]
 沒錯...`;
 
-    const podcastUserContent = `內容標題：${noteTitle || '未命名'}
-使用語言：${isEnglish ? 'English' : '繁體中文'}
+    const podcastUserContent = `Title: ${noteTitle || 'Untitled'}
+Target Language: ${isEnglish ? 'English' : 'Traditional Chinese (繁體中文)'}
 
-以下是需要改寫為 Podcast 腳本的內容：
+Raw Content to Adapt:
 ${noteContents}`;
 
-    const prompt = `【任務說明】
+    const prompt = `[TASK INSTRUCTIONS]
 ${podcastSystemPrompt}
 
-【原始內容】
+[RAW CONTENT]
 ${podcastUserContent}
 
-請嚴格遵循【任務說明】，千萬不要把任務說明當成摘要或翻譯的對象。直接生成符合上述規則的 Podcast 腳本：`;
+Follow the [TASK INSTRUCTIONS] strictly. DO NOT map or translate the instructions. Generate ONLY the podcast script based on the raw content:`;
 
     const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const geminiRes = await fetch(
@@ -2278,45 +2277,46 @@ app.post('/api/rag/social-post', async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
 
-    const socialSystemPrompt = `你是一位專業的社群媒體內容編輯。你的任務是將使用者提供的 AI 回答改寫為一篇適合在 Threads 上發表的知識型串文。
+    const socialSystemPrompt = `You are a professional social media content editor. Your task is to rewrite the AI's answer into an engaging, knowledge-based thread suitable for Threads.
 
-格式規則 — Threads 串文：
-- 將文章切分為多個獨立段落，每段用 --- 分隔線隔開。
-- 每段代表 Threads 上的一則貼文（建議每段 150~300 字以內）。
-- 第 1 段：以吸引人的 hook 開頭（問句或金句），點出主題。
-- 中間段落：每段聚焦一個重點或觀點，使用 emoji 與條列式提升可讀性。
-- 結尾段：總結 + 行動呼籲 (CTA) + hashtag。
+FORMAT RULES (Threads):
+- Split the article into multiple distinct paragraphs, separated by --- lines.
+- Each paragraph represents a single Threads post (keep each under 150-300 words).
+- Post 1: Start with a catchy hook (a question or strong statement) to introduce the topic.
+- Middle Posts: Focus on one key point per post. Use emojis and bullet points to improve readability.
+- Final Post: Conclusion + Call to Action (CTA) + hashtags.
 
-APA 引用規則：
-- 只引用有明確原始來源（作者、平台、URL）的資料。
-- 在行文中以 APA 行內引用標注，例如：(@作者名, 日期) 或 (標題, 平台, 日期)。
-- 文末的 References 段落必須使用 APA 格式，只列出有原始 URL 的來源。
-- 禁止在 References 中出現 HedgeDoc、Obsidian、localhost 或任何內部筆記系統的連結。
-- 如果沒有任何可引用的外部來源，就省略 References 段落，不要編造。
+APA CITATION RULES:
+- ONLY cite sources that have clear original attribution (Author, Platform, URL).
+- Use in-line APA citations like: (@Author, Date) or (Title, Platform, Date).
+- The "References" section at the end MUST use APA format and ONLY include sources with an original URL.
+- DO NOT invent or fabricate any sources. 
+- PROHIBITED: Do not include links from HedgeDoc, Obsidian, localhost, or any internal notebook systems in the References.
+- If there are no valid external sources to cite, omit the References section entirely.
 
-其他：
-- 使用繁體中文撰寫。
-- 文末加上 3~5 個相關 hashtag。
-- 直接輸出完整的 Threads 串文，不要加任何前言或結語。`;
+MISCELLANEOUS:
+- The entire output MUST be written in Traditional Chinese (繁體中文).
+- Add 3-5 relevant hashtags at the very end.
+- Output ONLY the final Threads post content. Do not include any conversational preamble or conclusion.`;
 
-    const socialUserPrompt = `原始查詢問題：
+    const socialUserPrompt = `Original User Query:
 ${query}
 
-AI 原始回答：
+Original AI Answer text:
 ${answer}
 
-可引用的原始來源資料（僅限以下清單）：
+Available Source Material (CITE ONLY THESE):
 ${sourceList}
 
-今天日期：${today}`;
+Today's Date: ${today}`;
 
-    const prompt = `【任務說明】
+    const prompt = `[TASK INSTRUCTIONS]
 ${socialSystemPrompt}
 
-【原始內容】
+[RAW CONTENT]
 ${socialUserPrompt}
 
-請嚴格遵循【任務說明】，千萬不要把任務說明當成摘要的對象，也不要將其翻譯為英文。直接輸出符合格式要求的 Threads 串文：`;
+Follow the [TASK INSTRUCTIONS] strictly. Output the final Traditional Chinese Threads post directly without any other chatter:`;
 
     const geminiModel = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${settings.geminiApiKey}`;
