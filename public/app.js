@@ -128,7 +128,6 @@ async function loadSettings() {
         const settings = await res.json();
 
         document.getElementById('settingGeminiKey').value = settings.geminiApiKey || '';
-        document.getElementById('settingGeminiModel').value = settings.geminiModel || 'gemma-3-27b-it';
         document.getElementById('settingHedgedocUrl').value = settings.hedgedocUrl || '';
         document.getElementById('settingHedgedocCookie').value = settings.hedgedocCookie || '';
         document.getElementById('settingWhisperUrl').value = settings.whisperUrl || 'http://localhost:8080';
@@ -138,6 +137,14 @@ async function loadSettings() {
         document.getElementById('settingXCookie').value = settings.xCookie || '';
         const igEl = document.getElementById('settingIgCookie');
         if (igEl) igEl.value = settings.igCookie || '';
+
+        // Load available models from API, then set the saved value
+        const savedModel = settings.geminiModel || 'gemma-4-26b-a4b-it';
+        if (settings.geminiApiKey) {
+            await loadGeminiModels(savedModel);
+        } else {
+            document.getElementById('settingGeminiModel').value = savedModel;
+        }
     } catch (e) {
         console.error('Load settings error:', e);
     }
@@ -172,6 +179,71 @@ async function saveSettings() {
         }
     } catch (e) {
         showToast(`儲存失敗: ${e.message}`, 'error');
+    }
+}
+
+// ─── Load Gemini Models ───────────────────────────────────
+async function loadGeminiModels(selectedModel) {
+    const select = document.getElementById('settingGeminiModel');
+    const status = document.getElementById('modelLoadStatus');
+
+    // Show loading state
+    if (status) {
+        status.style.display = 'block';
+        status.textContent = '⏳ 正在載入可用模型...';
+        status.style.color = 'var(--text-muted)';
+    }
+
+    // Remember current selection if no explicit model passed
+    const currentValue = selectedModel || select.value || 'gemma-4-26b-a4b-it';
+
+    try {
+        const res = await fetch(`${API}/api/gemini/models`);
+        const data = await res.json();
+
+        if (!res.ok || !data.success) {
+            throw new Error(data.error || '載入失敗');
+        }
+
+        // Rebuild options
+        select.innerHTML = '';
+        data.models.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.id;
+            opt.textContent = m.id === 'gemma-4-26b-a4b-it' ? `${m.id} (預設)` : m.id;
+            opt.title = m.description || '';
+            select.appendChild(opt);
+        });
+
+        // Restore selection — if the saved model exists in the list, select it
+        const modelExists = Array.from(select.options).some(o => o.value === currentValue);
+        if (modelExists) {
+            select.value = currentValue;
+        } else {
+            // If saved model not found, add it as a custom option and select it
+            const customOpt = document.createElement('option');
+            customOpt.value = currentValue;
+            customOpt.textContent = `${currentValue} (自訂)`;
+            select.insertBefore(customOpt, select.firstChild);
+            select.value = currentValue;
+        }
+
+        if (status) {
+            status.textContent = `✅ 已載入 ${data.models.length} 個可用模型`;
+            status.style.color = '#10b981';
+            setTimeout(() => { status.style.display = 'none'; }, 3000);
+        }
+    } catch (e) {
+        console.error('Load Gemini models error:', e);
+        if (status) {
+            status.textContent = `❌ ${e.message}`;
+            status.style.color = '#ef4444';
+        }
+        // Keep the current option so the user can still use it
+        if (select.options.length === 0 || !Array.from(select.options).some(o => o.value === currentValue)) {
+            select.innerHTML = `<option value="${currentValue}">${currentValue}</option>`;
+            select.value = currentValue;
+        }
     }
 }
 

@@ -42,7 +42,7 @@ function saveJSON(file, data) {
 function getSettings() {
   return loadJSON(SETTINGS_FILE, {
     geminiApiKey: '',
-    geminiModel: 'gemma-3-27b-it',
+    geminiModel: 'gemma-4-26b-a4b-it',
     hedgedocUrl: '',
     hedgedocCookie: '',
     whisperUrl: 'http://localhost:8080',
@@ -1505,6 +1505,38 @@ app.post('/api/whisper/transcribe', async (req, res) => {
   }
 });
 
+// ─── Gemini Models List ──────────────────────────────────────
+app.get('/api/gemini/models', async (req, res) => {
+  try {
+    const settings = getSettings();
+    if (!settings.geminiApiKey) return res.status(400).json({ error: '請先設定 Gemini API Key' });
+
+    const apiRes = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${settings.geminiApiKey}&pageSize=100`
+    );
+
+    if (!apiRes.ok) {
+      const errText = await apiRes.text();
+      throw new Error(`Gemini API 錯誤: ${apiRes.status} - ${errText}`);
+    }
+
+    const data = await apiRes.json();
+    const models = (data.models || [])
+      .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+      .map(m => ({
+        id: m.name.replace('models/', ''),
+        displayName: m.displayName || m.name.replace('models/', ''),
+        description: m.description || ''
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    res.json({ success: true, models });
+  } catch (error) {
+    console.error('Gemini models list error:', error.message);
+    res.status(500).json({ error: `取得模型列表失敗: ${error.message}` });
+  }
+});
+
 // ─── Gemini Summarize ────────────────────────────────────────
 app.post('/api/gemini/summarize', async (req, res) => {
   try {
@@ -1543,7 +1575,7 @@ ${content}
 
 請直接根據上述原始內容輸出整理好的 Markdown 筆記（嚴禁編造內容，嚴禁使用 \`\`\` 包裝）：`;
 
-    const model = settings.geminiModel || 'gemma-3-27b-it';
+    const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
       {
@@ -1688,7 +1720,7 @@ Yes, exactly...` : `[host_f]
 以下是需要改寫的內容：
 ${noteContents}`;
 
-    const model = settings.geminiModel || 'gemma-3-27b-it';
+    const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
       {
@@ -2270,7 +2302,7 @@ ${sourceList}
 
 請直接輸出完整的 Threads 串文（每段用 --- 分隔，最後附 References 和 hashtag）：`;
 
-    const geminiModel = settings.geminiModel || 'gemini-2.5-flash';
+    const geminiModel = settings.geminiModel || 'gemma-4-26b-a4b-it';
     const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${settings.geminiApiKey}`;
     
     const geminiRes = await fetch(apiUrl, {
