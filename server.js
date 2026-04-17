@@ -1546,15 +1546,13 @@ app.post('/api/gemini/summarize', async (req, res) => {
     const settings = getSettings();
     if (!settings.geminiApiKey) return res.status(400).json({ error: '請先設定 Gemini API Key' });
 
-    const prompt = type === 'podcast'
-      ? req.body.prompt
-      : `你是一位專業的筆記整理助手。你的任務是根據以下提供的內容，直接整理成繁體中文筆記。
+    const systemPrompt = `你是一位專業的筆記整理助手。你的任務是將使用者提供的原始內容直接整理成繁體中文筆記。
 
 嚴格規則（必須遵守）：
 - 你必須直接輸出整理好的筆記，不可以回覆任何對話、提問或要求更多資訊
 - 不要說「請提供連結」或「請貼上內容」之類的話
 - 嚴禁捏造、幻想或編造任何不在原始內容中的資訊
-- 只能根據下方提供的原始內容進行整理，不可以自行補充你認為可能的內容
+- 只能根據使用者提供的原始內容進行整理，不可以自行補充你認為可能的內容
 - 如果原始內容太少無法整理成有意義的筆記，就直接輸出：「⚠️ 原始內容不足，無法生成完整筆記。」並附上原始內容
 - ⚠️ 嚴格輸出限制：必須『只』輸出筆記內容，絕對不可以使用 markdown 的 code block（也就是不要用 \`\`\` 包起來）。
 
@@ -1566,25 +1564,31 @@ app.post('/api/gemini/summarize', async (req, res) => {
 5. 列出關鍵要點
 6. 如果有技術內容，請適當解釋
 7. 保持簡潔但完整
-8. 語言使用繁體中文
+8. 語言使用繁體中文`;
 
-以下是需要整理的原始內容：
----
-${content}
----
+    const userPrompt = type === 'podcast'
+      ? req.body.prompt
+      : `請將以下原始內容整理成繁體中文 Markdown 筆記：
 
-請直接根據上述原始內容輸出整理好的 Markdown 筆記（嚴禁編造內容，嚴禁使用 \`\`\` 包裝）：`;
+${content}`;
 
     const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
+    const requestBody = {
+      contents: [{ role: 'user', parts: [{ text: userPrompt }] }],
+      generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
+    };
+
+    // Use systemInstruction to separate role from content (prevents model from summarizing instructions)
+    if (type !== 'podcast') {
+      requestBody.systemInstruction = { parts: [{ text: systemPrompt }] };
+    }
+
     const geminiRes = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.7, maxOutputTokens: 8192 }
-        })
+        body: JSON.stringify(requestBody)
       }
     );
 
@@ -1692,32 +1696,33 @@ app.post('/api/podcast/generate-script', async (req, res) => {
     const cnMinutes = numMinutes * 4;
     const cnWordCount = targetWordCount * 4;
 
-    const subPrompt = isEnglish
-      ? `Please adapt the following content into a ${numMinutes}-minute two-host podcast script in English.
+    const podcastSystemPrompt = isEnglish
+      ? `You are a podcast script writer. Write a ${numMinutes}-minute two-host podcast script in English.
 Hosts are Bella (host_f, female, curious and lively) and Eric (host_m, male, grounded and professional).
 Make the conversation sound natural, engaging, and suitable for a ${numMinutes}-minute audio!
-IMPORTANT: A normal speaking rate is about 200 words per minute. To hit the ${numMinutes}-minute mark, your script MUST contain approximately ${targetWordCount} words in total across all dialogue. Please expand on the topics, add natural banter, examples, and deep dives to reach this length without sounding repetitive.`
-      : `請將以下貼文內容改寫為長度約 ${cnMinutes} 分鐘的 Podcast 雙人對談腳本。
-主持人為建國 (host_f，男，提問與引導) 與雲健 (host_m，男，沉穩專業的分析)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。目標是深入探討主題，讓使用者聽完後產生獨到洞見與啟發。可以包含專有名詞的英文。
-⚠️ 長度要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${cnMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${cnWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與探討，來大幅擴充內容長度並提供深刻洞見，切忌空洞重複。`;
-
-    const prompt = `${subPrompt}
-⚠️ 嚴格輸出限制：你必須『只』使用純文字格式，絕對不要包含任何 JSON、陣列或寫程式碼的結構 (如 \`\`\`json )，也不要前言結語！
-請使用以下固定格式，在每一句話的最前面加上發言人的標註：
-${isEnglish ? `[host_f]
+IMPORTANT: A normal speaking rate is about 200 words per minute. To hit the ${numMinutes}-minute mark, your script MUST contain approximately ${targetWordCount} words in total across all dialogue. Please expand on the topics, add natural banter, examples, and deep dives to reach this length without sounding repetitive.
+⚠️ Output ONLY plain text in the following format. No JSON, no arrays, no code blocks (no \`\`\`), no preamble, no conclusion.
+Format each line with speaker tag:
+[host_f]
 Hello everyone...
 
 [host_m]
-Yes, exactly...` : `[host_f]
+Yes, exactly...`
+      : `你是一位 Podcast 腳本撰寫專家。請將使用者提供的內容改寫為長度約 ${cnMinutes} 分鐘的 Podcast 雙人對談腳本。
+主持人為建國 (host_f，男，提問與引導) 與雲健 (host_m，男，沉穩專業的分析)。請加入台灣日常口語習慣（如：喔、吧、對啊、其實）。目標是深入探討主題，讓使用者聽完後產生獨到洞見與啟發。可以包含專有名詞的英文。
+⚠️ 長度要求：一般人講話速度約為每分鐘 200 字，為了確保錄製出 ${cnMinutes} 分鐘的語音，你的講稿總字數「必須」達到約 ${cnWordCount} 字！請適當加入舉例、情境模擬、深入分析和主持人之間的自然互動與探討，來大幅擴充內容長度並提供深刻洞見，切忌空洞重複。
+⚠️ 嚴格輸出限制：你必須『只』使用純文字格式，絕對不要包含任何 JSON、陣列或寫程式碼的結構 (如 \`\`\`json )，也不要前言結語！
+請使用以下固定格式，在每一句話的最前面加上發言人的標註：
+[host_f]
 大家好...
 
 [host_m]
-沒錯...`}
+沒錯...`;
 
-內容標題：${noteTitle || '未命名'}
+    const podcastUserPrompt = `內容標題：${noteTitle || '未命名'}
 使用語言：${isEnglish ? 'English' : '繁體中文'}
 
-以下是需要改寫的內容：
+以下是需要改寫為 Podcast 腳本的內容：
 ${noteContents}`;
 
     const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
@@ -1727,7 +1732,8 @@ ${noteContents}`;
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          systemInstruction: { parts: [{ text: podcastSystemPrompt }] },
+          contents: [{ role: 'user', parts: [{ text: podcastUserPrompt }] }],
           generationConfig: { temperature: 0.8, maxOutputTokens: 8192 }
         })
       }
@@ -2265,40 +2271,37 @@ app.post('/api/rag/social-post', async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0];
 
-    const prompt = `你是一位專業的社群媒體內容編輯。請將以下 AI 回答改寫為一篇適合在 **Threads** 上發表的知識型串文。
+    const socialSystemPrompt = `你是一位專業的社群媒體內容編輯。你的任務是將使用者提供的 AI 回答改寫為一篇適合在 Threads 上發表的知識型串文。
 
-## 嚴格要求：
-
-### 格式規則 — Threads 串文
-- 將文章切分為 **多個獨立段落**，每段用 \`---\` 分隔線隔開。
+格式規則 — Threads 串文：
+- 將文章切分為多個獨立段落，每段用 --- 分隔線隔開。
 - 每段代表 Threads 上的一則貼文（建議每段 150~300 字以內）。
-- **第 1 段**：以吸引人的 hook 開頭（問句或金句），點出主題。
-- **中間段落**：每段聚焦一個重點或觀點，使用 emoji 與條列式提升可讀性。
-- **結尾段**：總結 + 行動呼籲 (CTA) + hashtag。
+- 第 1 段：以吸引人的 hook 開頭（問句或金句），點出主題。
+- 中間段落：每段聚焦一個重點或觀點，使用 emoji 與條列式提升可讀性。
+- 結尾段：總結 + 行動呼籲 (CTA) + hashtag。
 
-### APA 引用規則
-- **只引用有明確原始來源（作者、平台、URL）的資料**。
-- 在行文中以 APA 行內引用標注，例如：(@作者名, ${today}) 或 (標題, 平台, 日期)。
-- 文末的 **References** 段落必須使用 APA 格式，只列出有原始 URL 的來源：
-  - 格式：作者. (日期). *標題*. 平台. URL
-  - 若無作者：*標題*. (日期). 平台. URL
-- **禁止** 在 References 中出現 HedgeDoc、Obsidian、localhost 或任何內部筆記系統的連結。
+APA 引用規則：
+- 只引用有明確原始來源（作者、平台、URL）的資料。
+- 在行文中以 APA 行內引用標注，例如：(@作者名, 日期) 或 (標題, 平台, 日期)。
+- 文末的 References 段落必須使用 APA 格式，只列出有原始 URL 的來源。
+- 禁止在 References 中出現 HedgeDoc、Obsidian、localhost 或任何內部筆記系統的連結。
 - 如果沒有任何可引用的外部來源，就省略 References 段落，不要編造。
 
-### 其他
-- 使用**繁體中文**撰寫。
+其他：
+- 使用繁體中文撰寫。
 - 文末加上 3~5 個相關 hashtag。
+- 直接輸出完整的 Threads 串文，不要加任何前言或結語。`;
 
-## 原始查詢問題：
+    const socialUserPrompt = `原始查詢問題：
 ${query}
 
-## AI 原始回答：
+AI 原始回答：
 ${answer}
 
-## 可引用的原始來源資料（僅限以下清單）：
+可引用的原始來源資料（僅限以下清單）：
 ${sourceList}
 
-## 今天日期：${today}
+今天日期：${today}
 
 請直接輸出完整的 Threads 串文（每段用 --- 分隔，最後附 References 和 hashtag）：`;
 
@@ -2309,7 +2312,8 @@ ${sourceList}
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
+        systemInstruction: { parts: [{ text: socialSystemPrompt }] },
+        contents: [{ role: 'user', parts: [{ text: socialUserPrompt }] }],
         generationConfig: { temperature: 0.8, maxOutputTokens: 8192 }
       })
     });
