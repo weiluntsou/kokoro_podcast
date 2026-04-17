@@ -44,13 +44,16 @@ function switchPage(page) {
     document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
 
     document.getElementById(`page-${page}`).classList.add('active');
-    document.querySelector(`[data-page="${page}"]`).classList.add('active');
+    const navBtn = document.querySelector(`[data-page="${page}"]`);
+    if (navBtn) navBtn.classList.add('active');
 
     // Refresh data when switching pages
     if (page === 'notes') loadNotesList();
     if (page === 'tasks') TaskQueue.render();
     if (page === 'podcast') {
         loadPodcastNoteSelect();
+    }
+    if (page === 'player') {
         loadPodcastList();
     }
     if (page === 'video') {
@@ -874,6 +877,9 @@ function playPodcastById(id) {
 
 function playPodcast(podcast) {
     currentPodcastId = podcast.id;
+
+    // Switch to the player page automatically
+    switchPage('player');
 
     const playerCard = document.getElementById('podcastPlayerCard');
     const audio = document.getElementById('podcastAudio');

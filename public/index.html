@@ -33,7 +33,11 @@
       </button>
       <button class="nav-btn" data-page="podcast" id="nav-podcast" onclick="switchPage('podcast')">
         🎙️
-        <span class="tooltip">Podcast</span>
+        <span class="tooltip">生成 Podcast</span>
+      </button>
+      <button class="nav-btn" data-page="player" id="nav-player" onclick="switchPage('player')">
+        🎧
+        <span class="tooltip">播放器</span>
       </button>
       <button class="nav-btn" data-page="rag" id="nav-rag" onclick="switchPage('rag')">
         🔍
@@ -294,91 +298,93 @@
           <p>選擇筆記生成雙人主持 Podcast</p>
         </div>
 
-        <div class="grid-2">
-          <!-- Left: Generate Podcast -->
-          <div>
-            <!-- Note Selection -->
-            <div class="card">
-              <div class="card-header">
-                <div class="icon blue">📋</div>
-                <div>
-                  <h3>選擇筆記</h3>
-                  <p>勾選要轉為 Podcast 的筆記</p>
-                </div>
-              </div>
-              <div class="note-select-list" id="podcastNoteSelect">
-                <div class="empty-state" style="padding:20px">
-                  <p>尚無可用筆記</p>
-                </div>
-              </div>
-              <div class="flex gap-2" style="align-items: center;">
-                <select id="podcastLanguage" class="form-control" style="width:120px; flex-shrink:0;">
-                  <option value="zh">🇹🇼 中文</option>
-                  <option value="en">🇺🇸 英文</option>
-                </select>
-                <button class="btn btn-primary" id="btnGenPodcast" onclick="enqueuePodcast()" disabled style="flex-grow:1;">
-                  🚀 加入 Podcast 生成序列
-                </button>
-              </div>
-            </div>
-
-            <!-- Script Preview -->
-            <div id="scriptSection" class="card" style="display:none">
-              <div class="card-header">
-                <div class="icon orange">📜</div>
-                <div>
-                  <h3>Podcast 講稿</h3>
-                  <p>雙人主持對話</p>
-                </div>
-              </div>
-              <div class="script-preview" id="scriptPreview"></div>
+        <!-- Note Selection -->
+        <div class="card">
+          <div class="card-header">
+            <div class="icon blue">📋</div>
+            <div>
+              <h3>選擇筆記</h3>
+              <p>勾選要轉為 Podcast 的筆記</p>
             </div>
           </div>
-
-          <!-- Right: Podcast List + Player -->
-          <div>
-            <!-- Active Player -->
-            <div class="card" id="podcastPlayerCard" style="display:none">
-              <div class="card-header">
-                <div class="icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);color:white">🎧</div>
-                <div>
-                  <h3>正在播放</h3>
-                  <p id="currentPodcastTitle">-</p>
-                </div>
-                <button class="btn btn-secondary btn-sm" onclick="enterDrivingMode()" style="margin-left:auto;">🚗 駕駛模式</button>
-              </div>
-              <div class="audio-player">
-                <div class="audio-player-top">
-                  <button class="audio-play-btn" id="podcastPlayBtn" onclick="togglePodcastPlay()">▶</button>
-                  <div class="audio-info">
-                    <div class="audio-title" id="podcastAudioTitle">-</div>
-                    <div class="audio-time">
-                      <span id="podcastCurrentTime">00:00</span> / <span id="podcastDuration">00:00</span>
-                    </div>
-                  </div>
-                </div>
-                <div class="audio-progress" id="podcastProgress" onclick="seekPodcast(event)">
-                  <div class="audio-progress-bar" id="podcastProgressBar" style="width:0%"></div>
-                </div>
-              </div>
-              <audio id="podcastAudio" preload="auto"></audio>
+          <div class="note-select-list" id="podcastNoteSelect">
+            <div class="empty-state" style="padding:20px">
+              <p>尚無可用筆記</p>
             </div>
+          </div>
+          <div class="flex gap-2" style="align-items: center;">
+            <select id="podcastLanguage" class="form-control" style="width:120px; flex-shrink:0;">
+              <option value="zh">🇹🇼 中文</option>
+              <option value="en">🇺🇸 英文</option>
+            </select>
+            <button class="btn btn-primary" id="btnGenPodcast" onclick="enqueuePodcast()" disabled style="flex-grow:1;">
+              🚀 加入 Podcast 生成序列
+            </button>
+          </div>
+        </div>
 
-            <!-- Podcast History -->
-            <div class="card">
-              <div class="card-header">
-                <div class="icon purple">📚</div>
-                <div>
-                  <h3>Podcast 列表</h3>
-                  <p>已生成的 Podcast</p>
+        <!-- Script Preview -->
+        <div id="scriptSection" class="card" style="display:none">
+          <div class="card-header">
+            <div class="icon orange">📜</div>
+            <div>
+              <h3>Podcast 講稿</h3>
+              <p>雙人主持對話</p>
+            </div>
+          </div>
+          <div class="script-preview" id="scriptPreview"></div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: Player                                   -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-player" class="page">
+        <div class="page-header">
+          <h1>🎧 Podcast 播放器</h1>
+          <p>播放已生成的 Podcast</p>
+        </div>
+
+        <!-- Active Player -->
+        <div class="card player-card" id="podcastPlayerCard" style="display:none">
+          <div class="card-header">
+            <div class="icon" style="background:linear-gradient(135deg,#f59e0b,#ef4444);color:white">🎧</div>
+            <div style="min-width:0; flex:1;">
+              <h3>正在播放</h3>
+              <p id="currentPodcastTitle" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">-</p>
+            </div>
+            <button class="btn btn-secondary btn-sm" onclick="enterDrivingMode()" style="flex-shrink:0;">🚗 駕駛模式</button>
+          </div>
+          <div class="audio-player">
+            <div class="audio-player-top">
+              <button class="audio-play-btn" id="podcastPlayBtn" onclick="togglePodcastPlay()">▶</button>
+              <div class="audio-info">
+                <div class="audio-title" id="podcastAudioTitle">-</div>
+                <div class="audio-time">
+                  <span id="podcastCurrentTime">00:00</span> / <span id="podcastDuration">00:00</span>
                 </div>
               </div>
-              <div id="podcastList">
-                <div class="empty-state" style="padding:20px">
-                  <div class="icon">🎵</div>
-                  <p>尚未生成任何 Podcast</p>
-                </div>
-              </div>
+            </div>
+            <div class="audio-progress" id="podcastProgress" onclick="seekPodcast(event)">
+              <div class="audio-progress-bar" id="podcastProgressBar" style="width:0%"></div>
+            </div>
+          </div>
+          <audio id="podcastAudio" preload="auto"></audio>
+        </div>
+
+        <!-- Podcast History -->
+        <div class="card">
+          <div class="card-header">
+            <div class="icon purple">📚</div>
+            <div>
+              <h3>Podcast 列表</h3>
+              <p>已生成的 Podcast</p>
+            </div>
+          </div>
+          <div id="podcastList">
+            <div class="empty-state" style="padding:20px">
+              <div class="icon">🎵</div>
+              <p>尚未生成任何 Podcast</p>
             </div>
           </div>
         </div>
@@ -680,7 +686,7 @@
     </div>
   </div>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=4"></script>
 </body>
 
 </html>

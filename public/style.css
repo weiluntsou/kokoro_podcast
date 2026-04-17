@@ -1040,6 +1040,52 @@ textarea {
   margin: 0 auto;
 }
 
+/* ─── Player Page ──────────────────────────────────── */
+#page-player {
+  max-width: 700px;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+#page-player .card {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+#page-player .player-card .card-header {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+#page-player .audio-player {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+#page-player .audio-player-top {
+  overflow: hidden;
+}
+
+#page-player .podcast-item {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+}
+
+#page-player .podcast-item-header {
+  overflow: hidden;
+}
+
+#page-player .podcast-item-header > div {
+  min-width: 0;
+}
+
 /* ─── Grid Layout for Two Columns ──────────────────── */
 .grid-2 {
   display: grid;
@@ -1444,14 +1490,45 @@ textarea {
 
   /* ── Podcast player card header buttons ── */
   #podcastPlayerCard .card-header {
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    overflow: hidden;
   }
 
   #podcastPlayerCard .card-header button[onclick="enterDrivingMode()"] {
-    width: 100%;
-    justify-content: center;
+    width: auto;
+    flex-shrink: 0;
     margin-left: 0 !important;
-    margin-top: 6px;
+    margin-top: 0;
+    font-size: 11px;
+    padding: 6px 10px;
+  }
+
+  /* ── Player page mobile ── */
+  #page-player {
+    max-width: 100%;
+    padding: 16px 14px;
+    overflow-x: hidden;
+  }
+
+  #page-player .card {
+    padding: 12px;
+    overflow: hidden;
+    word-break: break-word;
+  }
+
+  #page-player .audio-player {
+    padding: 12px;
+  }
+
+  #page-player .podcast-item .flex.gap-2 {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  #page-player .podcast-item .flex.gap-2 .btn {
+    flex: 1;
+    min-width: 0;
+    justify-content: center;
   }
 
   /* ── Tweet preview badges ── */
