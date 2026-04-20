@@ -1606,6 +1606,27 @@ Follow the [TASK INSTRUCTIONS] strictly. DO NOT translate the instructions or in
     // Clean up: remove markdown code block markers if present
     text = text.replace(/^```(?:markdown)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
 
+    // 檢查產出品質
+    const hasTags = /#+\s*tags:/i.test(text) || /#+\s*標籤:/i.test(text);
+    const hasTitle = /^#+\s+.+/m.test(text) || /\n#+\s+.+/m.test(text);
+    const leakedKeywords = ['[TASK INSTRUCTIONS]', 'STRICT RULES', '[RAW CONTENT]', 'professional note-taking assistant', 'FORMAT PIPELINE'];
+    const hasLeakedPrompt = leakedKeywords.some(keyword => text.includes(keyword));
+    const chineseCharCount = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+
+    if (text.includes('⚠️ 原始內容不足，無法生成完整筆記。')) {
+      throw new Error('原始內容不足，無法生成完整筆記。');
+    }
+
+    if (!hasTags || !hasTitle || hasLeakedPrompt || chineseCharCount < 20) {
+      let reasons = [];
+      if (!hasTags) reasons.push('缺少 tags 標籤');
+      if (!hasTitle) reasons.push('缺少主標題 (# Title)');
+      if (hasLeakedPrompt) reasons.push('夾帶系統 Prompt');
+      if (chineseCharCount < 20) reasons.push('中文內容過少或未正確轉換');
+      
+      throw new Error(`生成品質未達要求 (${reasons.join(', ')})`);
+    }
+
     // Remove leaked instruction/meta content if model accidentally echoes prompt blocks.
     text = text
       .replace(/\[TASK INSTRUCTIONS\][\s\S]*?\[RAW CONTENT\]/gi, '')
