@@ -1435,6 +1435,30 @@ app.post('/api/videos/rename', (req, res) => {
   }
 });
 
+app.delete('/api/videos/:filename', (req, res) => {
+  try {
+    const filename = req.params.filename;
+    if (!filename || filename.includes('..') || filename.includes('/')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+
+    const videoPath = path.join(VIDEOS_DIR, filename);
+    const baseName = videoPath.replace(/\.[^/.]+$/, '');
+    
+    if (fs.existsSync(videoPath)) {
+      fs.unlinkSync(videoPath);
+      if (fs.existsSync(`${baseName}.wav`)) fs.unlinkSync(`${baseName}.wav`);
+      if (fs.existsSync(`${baseName}.meta.json`)) fs.unlinkSync(`${baseName}.meta.json`);
+      res.json({ success: true });
+    } else {
+      res.status(404).json({ error: 'Video file not found' });
+    }
+  } catch (error) {
+    console.error('Delete video error:', error.message);
+    res.status(500).json({ error: '刪除影片失敗: ' + error.message });
+  }
+});
+
 // ─── Serve Audio ─────────────────────────────────────────────
 app.use('/api/audio', express.static(AUDIO_DIR));
 

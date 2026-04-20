@@ -631,11 +631,30 @@ async function loadVideosList() {
             </div>
             <div class="note-actions">
               <button class="btn btn-primary btn-sm">▶️ 播放 / 轉筆記</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteVideo('${v.filename.replace(/'/g, "\\'")}', event)">🗑️ 刪除</button>
             </div>
           </div>
         `).join('');
     } catch (e) {
         console.error('Load videos error:', e);
+    }
+}
+
+async function deleteVideo(filename, event) {
+    event.stopPropagation();
+    if (!confirm(`確定要刪除影片「${filename}」嗎？\n(這也會一併刪除相關的音檔與資料)`)) return;
+
+    try {
+        const res = await fetch(`${API}/api/videos/${encodeURIComponent(filename)}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) {
+            showToast('已刪除影片', 'success');
+            loadVideosList();
+        } else {
+            showToast(`刪除失敗: ${data.error || '未知錯誤'}`, 'error');
+        }
+    } catch (e) {
+        showToast('刪除失敗', 'error');
     }
 }
 
