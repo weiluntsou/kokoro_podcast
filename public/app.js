@@ -631,7 +631,7 @@ async function loadVideosList() {
             </div>
             <div class="note-actions">
               <button class="btn btn-primary btn-sm">▶️ 播放 / 轉筆記</button>
-              <button class="btn btn-danger btn-sm" onclick="deleteVideo('${v.filename.replace(/'/g, "\\'")}', event)">🗑️ 刪除</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteVideo(decodeURIComponent('${encodeURIComponent(v.filename)}'), event)">🗑️ 刪除</button>
             </div>
           </div>
         `).join('');
