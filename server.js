@@ -1333,7 +1333,28 @@ app.post('/api/x/download-video', async (req, res) => {
     const cmd = `"${ytDlp}" ${cookieArgs} ${formatArg} --merge-output-format mp4 --no-playlist -o "${outputPath}" "${url}"`;
     console.log(`[download] cmd: ${cmd.replace(/--cookies "[^"]+"/, '--cookies <hidden>')}`);
 
-    execSync(cmd, { encoding: 'utf-8', timeout: 180000 });
+    // Use async exec to avoid blocking event loop & allow longer timeout (10 min)
+    await new Promise((resolve, reject) => {
+      const child = exec(cmd, { encoding: 'utf-8', timeout: 600000, maxBuffer: 10 * 1024 * 1024 }, (error, stdout, stderr) => {
+        if (error) {
+          // Provide a cleaner error message for timeout
+          if (error.killed && error.signal === 'SIGTERM') {
+            reject(new Error('下載超時（超過 10 分鐘），請嘗試較低畫質或檢查網路連線'));
+          } else {
+            reject(error);
+          }
+        } else {
+          resolve(stdout);
+        }
+      });
+      // Log yt-dlp progress to console
+      if (child.stderr) {
+        child.stderr.on('data', (data) => {
+          const line = data.toString().trim();
+          if (line) console.log(`[yt-dlp] ${line}`);
+        });
+      }
+    });
 
     if (fs.existsSync(outputPath)) {
       fs.writeFileSync(metaPath, JSON.stringify({ url, quality }), 'utf8');
