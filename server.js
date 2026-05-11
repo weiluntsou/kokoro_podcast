@@ -1641,22 +1641,38 @@ ${content}`;
       generationConfig: { temperature: 0.3, maxOutputTokens: 8192 }
     };
 
-    const geminiRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(requestBody)
-      }
-    );
+    // Retry with exponential backoff for transient 500/503 errors (known issue with gemma models)
+    const MAX_RETRIES = 3;
+    let data, geminiRes;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      geminiRes = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        }
+      );
 
-    if (!geminiRes.ok) {
+      if (geminiRes.ok) {
+        data = await geminiRes.json();
+        break;
+      }
+
       const errText = await geminiRes.text();
+      const isRetryable = geminiRes.status === 500 || geminiRes.status === 503;
+
+      if (isRetryable && attempt < MAX_RETRIES) {
+        const delayMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
+        console.log(`[gemini-retry] 第 ${attempt}/${MAX_RETRIES} 次失敗 (${geminiRes.status})，${delayMs/1000}s 後重試...`);
+        await new Promise(r => setTimeout(r, delayMs));
+        continue;
+      }
+
       throw new Error(`Gemini API 錯誤: ${geminiRes.status} - ${errText}`);
     }
 
-    const data = await geminiRes.json();
-    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     console.log('[gemini-raw] 原始輸出長度:', text.length, '前 300 字:', text.substring(0, 300));
 
