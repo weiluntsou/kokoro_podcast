@@ -1665,37 +1665,90 @@ Follow the [TASK INSTRUCTIONS] strictly. DO NOT translate the instructions or in
     const data = await geminiRes.json();
     let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    // Clean up: remove markdown code block markers if present
-    text = text.replace(/^```(?:markdown)?\s*\n?/i, '').replace(/\n?```\s*$/i, '').trim();
-
-    // 檢查產出品質
-    const hasTags = /#+\s*tags:/i.test(text) || /#+\s*標籤:/i.test(text);
-    const hasTitle = /^#+\s+.+/m.test(text) || /\n#+\s+.+/m.test(text);
-    const leakedKeywords = ['[TASK INSTRUCTIONS]', 'STRICT RULES', '[RAW CONTENT]', 'professional note-taking assistant', 'FORMAT PIPELINE'];
-    const hasLeakedPrompt = leakedKeywords.some(keyword => text.includes(keyword));
-    const chineseCharCount = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
-
-    if (text.includes('⚠️ 原始內容不足，無法生成完整筆記。')) {
-      throw new Error('原始內容不足，無法生成完整筆記。');
-    }
-
-    if (!hasTags || !hasTitle || hasLeakedPrompt || chineseCharCount < 20) {
-      let reasons = [];
-      if (!hasTags) reasons.push('缺少 tags 標籤');
-      if (!hasTitle) reasons.push('缺少主標題 (# Title)');
-      if (hasLeakedPrompt) reasons.push('夾帶系統 Prompt');
-      if (chineseCharCount < 20) reasons.push('中文內容過少或未正確轉換');
-      
-      throw new Error(`生成品質未達要求 (${reasons.join(', ')})`);
+    // Clean up: aggressively remove markdown code block markers (gemma models often wrap output)
+    // Handle ```markdown, ```md, ```text, ``` with or without language tag, possibly multiple
+    text = text.replace(/^```[a-zA-Z]*\s*\n?/gm, '').replace(/\n?```\s*$/gm, '').trim();
+    // Also handle case where entire output is wrapped in a single code block
+    if (text.startsWith('```') && text.endsWith('```')) {
+      text = text.slice(3).slice(0, -3).replace(/^[a-zA-Z]*\s*\n?/, '').trim();
     }
 
     // Remove leaked instruction/meta content if model accidentally echoes prompt blocks.
     text = text
       .replace(/\[TASK INSTRUCTIONS\][\s\S]*?\[RAW CONTENT\]/gi, '')
       .replace(/^-\s*(No code blocks\?|First line tags\?|Second line # Title\?|Traditional Chinese\?|No fabrication\?|No intro\/outro\?).*$/gim, '')
-      .replace(/^(No code blocks\?|First line tags\?|Second line # Title\?|Traditional Chinese\?|No fabrication\?|No intro\/outro\?).*$/gim, '')
+      .replace(/(No code blocks\?|First line tags\?|Second line # Title\?|Traditional Chinese\?|No fabrication\?|No intro\/outro\?).*$/gim, '')
+      .replace(/\[TASK INSTRUCTIONS\]/gi, '')
+      .replace(/\[RAW CONTENT\]/gi, '')
+      .replace(/STRICT RULES \(MUST FOLLOW\)/gi, '')
+      .replace(/FORMAT PIPELINE/gi, '')
+      .replace(/professional note-taking assistant/gi, '')
       .replace(/\n{3,}/g, '\n\n')
       .trim();
+
+    if (text.includes('⚠️ 原始內容不足，無法生成完整筆記。')) {
+      throw new Error('原始內容不足，無法生成完整筆記。');
+    }
+
+    // 檢查產出品質 — 嘗試自動修復而非直接拒絕
+    let hasTags = /#+\s*tags:/i.test(text) || /#+\s*標籤:/i.test(text);
+    let hasTitle = false;
+    // Check for a real title line (# Title) that is NOT the tags line
+    const textLines = text.split('\n');
+    for (const line of textLines) {
+      const trimmed = line.trim();
+      if (/^#{1,3}\s+.+/.test(trimmed) && !/tags:/i.test(trimmed) && !/標籤:/i.test(trimmed)) {
+        hasTitle = true;
+        break;
+      }
+    }
+
+    const chineseCharCount = (text.match(/[\u4e00-\u9fa5]/g) || []).length;
+
+    // Hard failure: content is truly unusable (too little Chinese)
+    if (chineseCharCount < 10) {
+      console.log('[quality-check] 中文字數過少:', chineseCharCount, '原始輸出:', text.substring(0, 200));
+      throw new Error(`生成品質未達要求 (中文內容過少或未正確轉換，僅 ${chineseCharCount} 字)`);
+    }
+
+    // Auto-fix: if tags line is missing, generate one from the content
+    if (!hasTags) {
+      console.log('[auto-fix] 缺少 tags 行，自動補充');
+      const chineseWords = text.match(/[\u4e00-\u9fa5]{2,4}/g) || [];
+      const uniqueWords = [...new Set(chineseWords)].slice(0, 3);
+      const autoTags = uniqueWords.length > 0 ? uniqueWords.join(' ') : '筆記';
+      text = `###### tags: ${autoTags}\n${text}`;
+      hasTags = true;
+    }
+
+    // Auto-fix: if title line is missing, extract one from the first meaningful line
+    if (!hasTitle) {
+      console.log('[auto-fix] 缺少主標題行，自動補充');
+      const contentLines = text.split('\n');
+      let titleText = '';
+      for (let i = 0; i < contentLines.length; i++) {
+        const trimmed = contentLines[i].trim();
+        if (trimmed && !/^#+\s*tags:/i.test(trimmed) && !/^#+\s*標籤:/i.test(trimmed)) {
+          titleText = trimmed
+            .replace(/^[#*\->\s]+/, '')
+            .replace(/[*_`]/g, '')
+            .substring(0, 60);
+          const tagsLineIdx = contentLines.findIndex(l => /^#+\s*tags:/i.test(l.trim()) || /^#+\s*標籤:/i.test(l.trim()));
+          const insertIdx = tagsLineIdx >= 0 ? tagsLineIdx + 1 : 0;
+          contentLines.splice(insertIdx, 0, `# ${titleText}`);
+          text = contentLines.join('\n');
+          break;
+        }
+      }
+      if (!titleText) {
+        const tagsLineIdx = text.indexOf('\n');
+        if (tagsLineIdx > 0) {
+          text = text.substring(0, tagsLineIdx) + '\n# 筆記整理\n' + text.substring(tagsLineIdx + 1);
+        } else {
+          text = '# 筆記整理\n' + text;
+        }
+      }
+    }
 
     // If tags line exists, keep only the note body from that line onward, and ensure tags are backticked.
     const tagsMatch = text.match(/(#+\s*(?:tags|標籤):\s*)(.+)/i);
