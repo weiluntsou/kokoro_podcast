@@ -1691,15 +1691,106 @@ ${content}`;
       }
     }
 
-    // Primary model → cascading fallback through multiple models
+    // ── Ollama chunked summarization (for small local models) ──
+    async function summarizeWithOllama(inputContent) {
+      const ollamaUrl = 'http://localhost:11434';
+      const ollamaModel = 'gemma3:270m';
+      console.log(`[ollama-fallback] 使用本地 Ollama (${ollamaModel}) 進行分段摘要...`);
+
+      // Split content into ~1000 char chunks at sentence boundaries
+      const MAX_CHUNK = 1000;
+      const chunks = [];
+      const sentences = inputContent.split(/(?<=[。！？\.\!\?\n])\s*/);
+      let currentChunk = '';
+      for (const s of sentences) {
+        if (currentChunk.length + s.length > MAX_CHUNK && currentChunk) {
+          chunks.push(currentChunk.trim());
+          currentChunk = s;
+        } else {
+          currentChunk += s;
+        }
+      }
+      if (currentChunk.trim()) chunks.push(currentChunk.trim());
+
+      console.log(`[ollama-fallback] 分為 ${chunks.length} 段進行摘要`);
+
+      // Summarize each chunk
+      const chunkSummaries = [];
+      for (let i = 0; i < chunks.length; i++) {
+        console.log(`[ollama-fallback] 處理第 ${i + 1}/${chunks.length} 段 (${chunks[i].length} 字)...`);
+        const chunkPrompt = `請用繁體中文簡要摘要以下內容的重點，不要加入任何額外說明：\n\n${chunks[i]}`;
+        try {
+          const ollamaRes = await fetch(`${ollamaUrl}/api/generate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: ollamaModel,
+              prompt: chunkPrompt,
+              stream: false,
+              options: { temperature: 0.3, num_predict: 512 }
+            })
+          });
+          if (!ollamaRes.ok) throw new Error(`Ollama ${ollamaRes.status}`);
+          const ollamaData = await ollamaRes.json();
+          const summary = ollamaData.response?.trim();
+          if (summary) chunkSummaries.push(summary);
+        } catch (chunkErr) {
+          console.log(`[ollama-fallback] 第 ${i + 1} 段失敗: ${chunkErr.message}`);
+          // Still continue with other chunks
+        }
+      }
+
+      if (chunkSummaries.length === 0) {
+        throw new Error('Ollama 本地模型也無法處理，請確認 Ollama 是否正在運行');
+      }
+
+      // Final merge: combine chunk summaries into structured note
+      const mergedContent = chunkSummaries.join('\n\n');
+      console.log(`[ollama-fallback] 合併 ${chunkSummaries.length} 段摘要，生成最終筆記...`);
+
+      const finalPrompt = `你是筆記整理助手。請將以下分段摘要合併整理成一篇完整的繁體中文結構化筆記。
+
+格式要求（嚴格遵守）：
+第一行：###### tags: 標籤1 標籤2 標籤3
+第二行：# 主標題
+然後：
+## 執行摘要
+（一段總結）
+## 核心要點
+（條列式重點）
+## 詳細內容
+（分段說明）
+
+以下是分段摘要：
+
+${mergedContent}`;
+
+      const finalRes = await fetch(`${ollamaUrl}/api/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: ollamaModel,
+          prompt: finalPrompt,
+          stream: false,
+          options: { temperature: 0.3, num_predict: 2048 }
+        })
+      });
+
+      if (!finalRes.ok) throw new Error(`Ollama 最終合併失敗: ${finalRes.status}`);
+      const finalData = await finalRes.json();
+      return finalData.response?.trim() || mergedContent;
+    }
+
+    // Primary model → Gemini fallbacks → Ollama local fallback
     let data, usedModel;
+    let text; // declare here for Ollama path
     try {
       ({ data, usedModel } = await tryModelWithRetries(model));
     } catch (primaryErr) {
       if (primaryErr.isRetryable) {
         let fallbackSuccess = false;
         for (const fb of FALLBACK_MODELS) {
-          if (fb === model) continue; // skip the model that just failed
+          if (fb === model) continue;
           console.log(`[gemini-fallback] ${model} 持續失敗，嘗試備用模型 ${fb}...`);
           try {
             ({ data, usedModel } = await tryModelWithRetries(fb, 2));
@@ -1711,16 +1802,28 @@ ${content}`;
           }
         }
         if (!fallbackSuccess) {
-          throw new Error(`Gemini API 錯誤: 主模型 ${model} 和所有備用模型均失敗，請稍後再試`);
+          // Ultimate fallback: local Ollama
+          console.log('[gemini-fallback] 所有 Gemini 模型均失敗，嘗試本地 Ollama...');
+          try {
+            const ollamaResult = await summarizeWithOllama(userPrompt);
+            data = null; // signal that we used Ollama
+            usedModel = 'ollama:gemma3:270m';
+            text = ollamaResult; // directly set text, skip Gemini data extraction
+          } catch (ollamaErr) {
+            throw new Error(`所有模型均失敗 — Gemini API: ${primaryErr.status}, Ollama: ${ollamaErr.message}`);
+          }
         }
       } else {
         throw new Error(`Gemini API 錯誤: ${primaryErr.status} - ${primaryErr.text}`);
       }
     }
 
-    let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    // Extract text from Gemini response (skip if Ollama already set text)
+    if (data) {
+      text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    }
     if (usedModel !== model) {
-      console.log(`[gemini-fallback] 使用備用模型 ${usedModel} 產出`);
+      console.log(`[fallback] 使用備用模型 ${usedModel} 產出`);
     }
 
     console.log('[gemini-raw] 原始輸出長度:', text.length, '前 500 字:', text.substring(0, 500));
