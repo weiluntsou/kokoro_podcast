@@ -1634,45 +1634,72 @@ app.post('/api/gemini/summarize', async (req, res) => {
 ${content}`;
 
     const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
-    const isGemmaModel = model.toLowerCase().includes('gemma');
-    const requestBody = {
-      ...(isGemmaModel ? {} : { system_instruction: { parts: [{ text: systemInstruction }] } }),
-      contents: [{ role: 'user', parts: [{ text: isGemmaModel ? systemInstruction + '\n\n' + userPrompt : userPrompt }] }],
-      generationConfig: { temperature: 0.3, maxOutputTokens: 8192 }
-    };
+    const FALLBACK_MODEL = 'gemini-2.0-flash-lite';
 
-    // Retry with exponential backoff for transient 500/503 errors (known issue with gemma models)
-    const MAX_RETRIES = 3;
-    let data, geminiRes;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      geminiRes = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${settings.geminiApiKey}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody)
+    // Build request body for a given model
+    function buildRequestBody(targetModel) {
+      const isGemma = targetModel.toLowerCase().includes('gemma');
+      return {
+        ...(isGemma ? {} : { system_instruction: { parts: [{ text: systemInstruction }] } }),
+        contents: [{ role: 'user', parts: [{ text: isGemma ? systemInstruction + '\n\n' + userPrompt : userPrompt }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 8192 }
+      };
+    }
+
+    // Try a model with retries, returns { data, usedModel } or throws
+    async function tryModelWithRetries(targetModel, maxRetries = 3) {
+      const body = buildRequestBody(targetModel);
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${targetModel}:generateContent?key=${settings.geminiApiKey}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+          }
+        );
+
+        if (res.ok) {
+          return { data: await res.json(), usedModel: targetModel };
         }
-      );
 
-      if (geminiRes.ok) {
-        data = await geminiRes.json();
-        break;
+        const errText = await res.text();
+        const isRetryable = res.status === 500 || res.status === 503;
+
+        if (isRetryable && attempt < maxRetries) {
+          const delayMs = Math.pow(2, attempt - 1) * 1000;
+          console.log(`[gemini-retry] ${targetModel} 第 ${attempt}/${maxRetries} 次失敗 (${res.status})，${delayMs/1000}s 後重試...`);
+          await new Promise(r => setTimeout(r, delayMs));
+          continue;
+        }
+
+        // Non-retryable or last attempt
+        throw { status: res.status, text: errText, isRetryable };
       }
+    }
 
-      const errText = await geminiRes.text();
-      const isRetryable = geminiRes.status === 500 || geminiRes.status === 503;
-
-      if (isRetryable && attempt < MAX_RETRIES) {
-        const delayMs = Math.pow(2, attempt - 1) * 1000; // 1s, 2s, 4s
-        console.log(`[gemini-retry] 第 ${attempt}/${MAX_RETRIES} 次失敗 (${geminiRes.status})，${delayMs/1000}s 後重試...`);
-        await new Promise(r => setTimeout(r, delayMs));
-        continue;
+    // Primary model → fallback
+    let data, usedModel;
+    try {
+      ({ data, usedModel } = await tryModelWithRetries(model));
+    } catch (primaryErr) {
+      if (primaryErr.isRetryable && model !== FALLBACK_MODEL) {
+        console.log(`[gemini-fallback] ${model} 持續失敗，自動降級至 ${FALLBACK_MODEL}...`);
+        try {
+          ({ data, usedModel } = await tryModelWithRetries(FALLBACK_MODEL, 2));
+          console.log(`[gemini-fallback] ✅ ${FALLBACK_MODEL} 成功`);
+        } catch (fallbackErr) {
+          throw new Error(`Gemini API 錯誤: 主模型 ${model} 和備用模型 ${FALLBACK_MODEL} 均失敗`);
+        }
+      } else {
+        throw new Error(`Gemini API 錯誤: ${primaryErr.status} - ${primaryErr.text}`);
       }
-
-      throw new Error(`Gemini API 錯誤: ${geminiRes.status} - ${errText}`);
     }
 
     let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    if (usedModel !== model) {
+      console.log(`[gemini-fallback] 使用備用模型 ${usedModel} 產出`);
+    }
 
     console.log('[gemini-raw] 原始輸出長度:', text.length, '前 500 字:', text.substring(0, 500));
 
