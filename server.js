@@ -1634,7 +1634,7 @@ app.post('/api/gemini/summarize', async (req, res) => {
 ${content}`;
 
     const model = settings.geminiModel || 'gemma-4-26b-a4b-it';
-    const FALLBACK_MODEL = 'gemini-2.0-flash-lite';
+    const FALLBACK_MODELS = ['gemini-2.5-flash-lite', 'gemini-2.0-flash-lite', 'gemini-1.5-flash'];
 
     // Build request body for a given model
     function buildRequestBody(targetModel) {
@@ -1664,10 +1664,23 @@ ${content}`;
         }
 
         const errText = await res.text();
-        const isRetryable = res.status === 500 || res.status === 503;
+        const isServerError = res.status === 500 || res.status === 503;
+        const isRateLimit = res.status === 429;
+        const isRetryable = isServerError || isRateLimit;
 
         if (isRetryable && attempt < maxRetries) {
-          const delayMs = Math.pow(2, attempt - 1) * 1000;
+          // For 429, try to parse the API-suggested retry delay
+          let delayMs = Math.pow(2, attempt - 1) * 1000;
+          if (isRateLimit) {
+            try {
+              const errObj = JSON.parse(errText);
+              const retryInfo = errObj?.error?.details?.find(d => d['@type']?.includes('RetryInfo'));
+              if (retryInfo?.retryDelay) {
+                const secs = parseInt(retryInfo.retryDelay);
+                if (secs > 0) delayMs = (secs + 2) * 1000; // add 2s buffer
+              }
+            } catch (e) { /* ignore parse error */ }
+          }
           console.log(`[gemini-retry] ${targetModel} 第 ${attempt}/${maxRetries} 次失敗 (${res.status})，${delayMs/1000}s 後重試...`);
           await new Promise(r => setTimeout(r, delayMs));
           continue;
@@ -1678,18 +1691,27 @@ ${content}`;
       }
     }
 
-    // Primary model → fallback
+    // Primary model → cascading fallback through multiple models
     let data, usedModel;
     try {
       ({ data, usedModel } = await tryModelWithRetries(model));
     } catch (primaryErr) {
-      if (primaryErr.isRetryable && model !== FALLBACK_MODEL) {
-        console.log(`[gemini-fallback] ${model} 持續失敗，自動降級至 ${FALLBACK_MODEL}...`);
-        try {
-          ({ data, usedModel } = await tryModelWithRetries(FALLBACK_MODEL, 2));
-          console.log(`[gemini-fallback] ✅ ${FALLBACK_MODEL} 成功`);
-        } catch (fallbackErr) {
-          throw new Error(`Gemini API 錯誤: 主模型 ${model} 和備用模型 ${FALLBACK_MODEL} 均失敗`);
+      if (primaryErr.isRetryable) {
+        let fallbackSuccess = false;
+        for (const fb of FALLBACK_MODELS) {
+          if (fb === model) continue; // skip the model that just failed
+          console.log(`[gemini-fallback] ${model} 持續失敗，嘗試備用模型 ${fb}...`);
+          try {
+            ({ data, usedModel } = await tryModelWithRetries(fb, 2));
+            console.log(`[gemini-fallback] ✅ ${fb} 成功`);
+            fallbackSuccess = true;
+            break;
+          } catch (fbErr) {
+            console.log(`[gemini-fallback] ❌ ${fb} 也失敗 (${fbErr.status})`);
+          }
+        }
+        if (!fallbackSuccess) {
+          throw new Error(`Gemini API 錯誤: 主模型 ${model} 和所有備用模型均失敗，請稍後再試`);
         }
       } else {
         throw new Error(`Gemini API 錯誤: ${primaryErr.status} - ${primaryErr.text}`);
