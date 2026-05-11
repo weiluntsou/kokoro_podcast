@@ -1674,7 +1674,7 @@ ${content}`;
 
     let text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
-    console.log('[gemini-raw] 原始輸出長度:', text.length, '前 300 字:', text.substring(0, 300));
+    console.log('[gemini-raw] 原始輸出長度:', text.length, '前 500 字:', text.substring(0, 500));
 
     // ── Step 1: Strip code blocks ──
     text = text.replace(/^```[a-zA-Z]*\s*\n?/gm, '').replace(/\n?```\s*$/gm, '').trim();
@@ -1682,24 +1682,64 @@ ${content}`;
       text = text.slice(3).slice(0, -3).replace(/^[a-zA-Z]*\s*\n?/, '').trim();
     }
 
-    // ── Step 2: Remove model "thinking out loud" / self-check blocks ──
-    // Gemma models frequently output self-checking, self-correction, and compliance checklists
-    const thinkingPatterns = [
-      /\*?\s*\(?\s*Self[- ]?Correct(?:ion|ing)[^)]*\)?\s*\*?[:\s][\s\S]*?(?=\n\s*#{1,6}\s|\n\s*---|\n\*?\s*\(?Final|\n\*?\s*Ready|$)/gi,
-      /\*?\s*\(?\s*Final (?:Polish|check|Check)[^)]*\)?\s*\*?[:\s][\s\S]*?(?=\n\s*#{1,6}\s|\n\s*---|\n\*?\s*Ready|$)/gi,
-      /\*?\s*Ready to output\.?\s*\*?/gi,
-      /\*?\s*Wait,.*?\*?$/gm,
-      /^\s*\*\s*Check:.*$/gm,
-      /^\s*\*\s*No (?:conversational filler|code blocks|hallucination|intro|outro).*$/gm,
-      /^\s*\*\s*(?:Tags|Title|Executive|Traditional Chinese).*?(?:correct|format|included|Yes|No).*$/gm,
-      /^\s*\*\s*(?:Taiwanese|Language).*$/gm,
-    ];
-    for (const pattern of thinkingPatterns) {
-      text = text.replace(pattern, '');
+    // ── Step 2: Smart extraction — find the structured Chinese content block ──
+    // Gemma models often output: junk preamble → English outline → Chinese structured notes
+    // Strategy: find the LAST occurrence of "## 執行摘要" or "## 核心要點" or similar Chinese headers
+    // and work backwards to find the tags/title that belongs to it
+    {
+      // Look for the structured Chinese section markers
+      const sectionMarkers = [
+        /^#{1,6}\s*(?:tags|標籤):\s*.+/gim,  // tags line
+        /^##\s*執行摘要/gm,
+        /^##\s*核心要點/gm,
+        /^##\s*詳細內容/gm,
+        /^##\s*摘要/gm,
+        /^##\s*重點/gm,
+      ];
+
+      // Find the last tags line that is followed by Chinese content
+      const allTagsPositions = [...text.matchAll(/^#{1,6}\s*(?:tags|標籤):\s*.+$/gim)];
+      const allChineseTitlePositions = [...text.matchAll(/^#\s+[\u4e00-\u9fa5].*$/gm)];
+
+      if (allTagsPositions.length > 0) {
+        // Find the best tags line: prefer the one closest before a Chinese title
+        let bestTagsIdx = allTagsPositions.length - 1; // default: last
+        for (let t = allTagsPositions.length - 1; t >= 0; t--) {
+          const tagsPos = allTagsPositions[t].index;
+          // Check if there's a Chinese title after this tags line
+          const hasChineseTitleAfter = allChineseTitlePositions.some(m => m.index > tagsPos && m.index - tagsPos < 200);
+          if (hasChineseTitleAfter) {
+            bestTagsIdx = t;
+            break;
+          }
+        }
+        const bestTagsMatch = allTagsPositions[bestTagsIdx];
+        if (bestTagsMatch && bestTagsMatch.index > 0) {
+          console.log(`[post-process] 找到最佳 tags 行位置: ${bestTagsMatch.index}，截取後續內容`);
+          text = text.slice(bestTagsMatch.index).trim();
+        }
+      }
     }
 
-    // ── Step 3: Remove leaked prompt instructions ──
+    // ── Step 3: Remove model thinking / self-check / prompt echo ──
+    // Remove entire blocks of English-language thinking, self-checks, and compliance checklists
     text = text
+      // Prompt instruction echoes
+      .replace(/^\s*Structured Traditional Chinese.*$/gm, '')
+      .replace(/^\s*\*\s+Only output the final note.*$/gm, '')
+      .replace(/^\s*\*\s+Use Taiwan Traditional Chinese.*$/gm, '')
+      .replace(/^\s*\*\s+Do not (?:fabricate|use markdown|output).*$/gm, '')
+      // Numbered format echoes (e.g., "3.  `## 執行摘要` (Summary paragraph)")
+      .replace(/^\s*\d+\.\s+`[#].*?`\s*\(.*?\)\s*$/gm, '')
+      .replace(/^\s*\d+\.\s+`[#].*?`\s*$/gm, '')
+      // Self-check lines
+      .replace(/^\s*\*?\s*\*?(?:Check|Self[- ]?Correct|Final (?:Polish|check)|Ready to output|Wait,).*$/gim, '')
+      .replace(/^\s*\(.*?(?:Self-Correction|drafting|polish|Ready to output).*?\)\s*$/gim, '')
+      // English outline items (lines starting with * followed by English italic labels)
+      .replace(/^\s*\*\s+\*(?:Core Problem|The Flaw|The Solution|The Four-Layer|The Role of AI|The Key File|The Outcome|The Competitive|Actionable Advice|Summary|Core Points|Detailed Content|Tags|Title):?\*.*$/gm, '')
+      // Numbered English items within outlines
+      .replace(/^\s+\d+\.\s+(?:Capture|Automation|Memory|Intelligence)\s*\(.*?\)\.?$/gm, '')
+      // Remove leaked prompt keywords
       .replace(/\[TASK INSTRUCTIONS\][\s\S]*?\[RAW CONTENT\]/gi, '')
       .replace(/\[TASK INSTRUCTIONS\]/gi, '')
       .replace(/\[RAW CONTENT\]/gi, '')
@@ -1711,46 +1751,82 @@ ${content}`;
       .replace(/^.*?LANGUAGE RESTRICTION.*$/gm, '')
       .replace(/^.*?NO HALLUCINATION.*$/gm, '');
 
-    // Remove numbered format instruction echoes (e.g., "1. First line MUST be tags...")
-    text = text.replace(/^\s*\d+\.\s+(?:First line MUST be|Second line MUST be|Use Markdown formatting|Include an executive|List the key|Provide technical|Keep it concise|The entire output MUST).*$/gm, '');
-    // Remove backticked format instruction echoes (e.g., "2.  `# [Title]`")
-    text = text.replace(/^\s*\d+\.\s+`#.*?`\s*$/gm, '');
-    // Remove lines that are just format labels like "3.  Executive Summary."
-    text = text.replace(/^\s*\d+\.\s+(?:Executive Summary|Key Takeaways|Technical Explanations|Concise but comprehensive)\.?\s*$/gm, '');
+    // ── Step 4: Remove any remaining pure-English paragraphs/lines ──
+    // Split into lines and remove lines that are predominantly English (no Chinese chars)
+    // BUT keep lines that are markdown headers with Chinese, or lines with significant Chinese
+    {
+      const lines = text.split('\n');
+      const cleaned = [];
+      let inEnglishBlock = false;
 
-    // ── Step 4: Remove "原始來源與內容" section (appended source) ──
-    text = text.replace(/---\s*\n+###?\s*原始來源[\s\S]*/i, '');
-    // Also remove if the raw English source content is echoed at the end
-    text = text.replace(/\n\*{2,}原始貼文內容[\s\S]*/i, '');
-    text = text.replace(/>\s*Your Obsidian Vault[\s\S]*$/i, '');
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
 
-    // ── Step 5: Remove bare "#" hashtag-style tags like "#Obsidian #第二腦" that are not HedgeDoc format ──
-    text = text.replace(/^\s*\*?\s*\*?Tags\*?\s*:?\*?\s*#\w[\s\S]*?$/gm, '');
+        // Always keep empty lines (they're just spacing)
+        if (!trimmed) {
+          if (!inEnglishBlock) cleaned.push(line);
+          continue;
+        }
 
-    // ── Step 6: Clean up excessive whitespace ──
+        // Always keep HedgeDoc tags line
+        if (/^#{1,6}\s*(?:tags|標籤):/i.test(trimmed)) {
+          inEnglishBlock = false;
+          cleaned.push(line);
+          continue;
+        }
+
+        // Count Chinese vs total characters
+        const chineseChars = (trimmed.match(/[\u4e00-\u9fa5]/g) || []).length;
+        const totalChars = trimmed.replace(/\s/g, '').length;
+        const chineseRatio = totalChars > 0 ? chineseChars / totalChars : 0;
+
+        // Lines with reasonable Chinese content — keep
+        if (chineseChars >= 2 || chineseRatio > 0.15) {
+          inEnglishBlock = false;
+          cleaned.push(line);
+          continue;
+        }
+
+        // Keep markdown formatting lines (##, -, **) only if they contain Chinese
+        if (/^#{1,3}\s/.test(trimmed) || /^\*\*/.test(trimmed) || /^-\s/.test(trimmed)) {
+          if (chineseChars > 0) {
+            inEnglishBlock = false;
+            cleaned.push(line);
+          } else {
+            inEnglishBlock = true; // Start of English block
+          }
+          continue;
+        }
+
+        // Pure English or non-Chinese line — skip
+        if (chineseChars === 0 && /[a-zA-Z]/.test(trimmed)) {
+          inEnglishBlock = true;
+          continue;
+        }
+
+        // Lines with special chars, numbers, etc. — keep if short or has some Chinese
+        if (chineseChars > 0 || (!trimmed.match(/[a-zA-Z]{3,}/) && trimmed.length < 10)) {
+          cleaned.push(line);
+        }
+      }
+      text = cleaned.join('\n');
+    }
+
+    // ── Step 5: Clean up ──
     text = text.replace(/\n{3,}/g, '\n\n').trim();
 
     if (text.includes('⚠️ 原始內容不足，無法生成完整筆記。')) {
       throw new Error('原始內容不足，無法生成完整筆記。');
     }
 
-    // ── Step 7: Find the LAST (best-quality) tags+title block ──
-    // Gemma sometimes outputs multiple drafts; the last one is usually the final polished version
-    const allTagsMatches = [...text.matchAll(/^(#{1,6}\s*(?:tags|標籤):\s*)(.+)$/gim)];
-    if (allTagsMatches.length > 1) {
-      // Use the last tags line as the start of the real content
-      const lastMatch = allTagsMatches[allTagsMatches.length - 1];
-      console.log(`[post-process] 發現 ${allTagsMatches.length} 個 tags 行，使用最後一個`);
-      text = text.slice(lastMatch.index).trim();
-    }
-
-    // ── Step 8: Quality check with auto-fix ──
+    // ── Step 6: Quality check with auto-fix ──
     let hasTags = /^#{1,6}\s*(?:tags|標籤):\s*.+/im.test(text);
     let hasTitle = false;
     const textLines = text.split('\n');
     for (const line of textLines) {
       const trimmed = line.trim();
-      if (/^#{1,3}\s+.+/.test(trimmed) && !/tags:/i.test(trimmed) && !/標籤:/i.test(trimmed)) {
+      if (/^#{1,3}\s+[\u4e00-\u9fa5].+/.test(trimmed) && !/tags:/i.test(trimmed) && !/標籤:/i.test(trimmed)) {
         hasTitle = true;
         break;
       }
@@ -1763,26 +1839,46 @@ ${content}`;
       throw new Error(`生成品質未達要求 (中文內容過少或未正確轉換，僅 ${chineseCharCount} 字)`);
     }
 
-    // Auto-fix: tags
+    // Auto-fix: tags — extract meaningful Chinese keywords from ## headers
     if (!hasTags) {
       console.log('[auto-fix] 缺少 tags 行，自動補充');
-      const chineseWords = text.match(/[\u4e00-\u9fa5]{2,4}/g) || [];
-      const uniqueWords = [...new Set(chineseWords)].slice(0, 3);
+      // Try to extract tags from ## section headers first
+      const sectionHeaders = text.match(/^##\s+([\u4e00-\u9fa5].+)$/gm) || [];
+      let autoTagWords = [];
+      if (sectionHeaders.length > 0) {
+        // Extract 2-4 char words from section headers
+        for (const h of sectionHeaders) {
+          const words = h.replace(/^##\s+/, '').match(/[\u4e00-\u9fa5]{2,4}/g) || [];
+          autoTagWords.push(...words);
+        }
+      }
+      if (autoTagWords.length === 0) {
+        autoTagWords = (text.match(/[\u4e00-\u9fa5]{2,4}/g) || []);
+      }
+      const uniqueWords = [...new Set(autoTagWords)].slice(0, 3);
       const autoTags = uniqueWords.length > 0 ? uniqueWords.join(' ') : '筆記';
       text = `###### tags: ${autoTags}\n${text}`;
     }
 
-    // Auto-fix: title
+    // Auto-fix: Chinese title
     if (!hasTitle) {
-      console.log('[auto-fix] 缺少主標題行，自動補充');
+      console.log('[auto-fix] 缺少中文主標題行，自動補充');
       const contentLines = text.split('\n');
       let titleText = '';
+      // Try to find a suitable Chinese title from the content
       for (let i = 0; i < contentLines.length; i++) {
         const trimmed = contentLines[i].trim();
-        if (trimmed && !/^#+\s*(?:tags|標籤):/i.test(trimmed)) {
-          titleText = trimmed.replace(/^[#*\->\s]+/, '').replace(/[*_`]/g, '').substring(0, 60);
+        if (!trimmed || /^#+\s*(?:tags|標籤):/i.test(trimmed)) continue;
+        const chCount = (trimmed.match(/[\u4e00-\u9fa5]/g) || []).length;
+        if (chCount >= 3) {
+          titleText = trimmed
+            .replace(/^[#*\->\s]+/, '')
+            .replace(/[*_`]/g, '')
+            .replace(/^\*\*(.+)\*\*$/, '$1')
+            .substring(0, 60);
           const tagsIdx = contentLines.findIndex(l => /^#+\s*(?:tags|標籤):/i.test(l.trim()));
-          contentLines.splice(tagsIdx >= 0 ? tagsIdx + 1 : 0, 0, `# ${titleText}`);
+          const insertIdx = tagsIdx >= 0 ? tagsIdx + 1 : 0;
+          contentLines.splice(insertIdx, 0, `# ${titleText}`);
           text = contentLines.join('\n');
           break;
         }
@@ -1792,7 +1888,7 @@ ${content}`;
       }
     }
 
-    // ── Step 9: Ensure tags line is first and properly formatted for HedgeDoc ──
+    // ── Step 7: Ensure tags line is first and properly formatted for HedgeDoc ──
     const tagsMatch = text.match(/(#{1,6}\s*(?:tags|標籤):\s*)(.+)/i);
     if (tagsMatch && typeof tagsMatch.index === 'number') {
       // Cut everything before the tags line (junk preamble)
@@ -1819,12 +1915,8 @@ ${content}`;
       }
     }
 
-    // ── Step 10: Final cleanup of any remaining self-check artifacts ──
-    text = text
-      .replace(/^\s*\*\s*\*?(?:Check|Tags|Title|Executive|No |Ready|Wait|Self|Final).*$/gm, '')
-      .replace(/^\s*\(.*(?:Self-Correction|drafting|polish|Ready to output).*\)\s*$/gim, '')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
+    // ── Step 8: Final cleanup ──
+    text = text.replace(/\n{3,}/g, '\n\n').trim();
 
     console.log('[gemini-clean] 清洗後長度:', text.length, '前 200 字:', text.substring(0, 200));
 
