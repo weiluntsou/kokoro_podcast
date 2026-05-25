@@ -19,4 +19,12 @@ else
     echo "套件已安裝，跳過檢查。"
 fi
 
-uvicorn main:app --reload --host 0.0.0.0 --port 8866
+# 限制科學計算與機器學習相關函式庫的執行緒數量以降低 CPU 負載
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export VECLIB_MAXIMUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+
+uvicorn main:app --host 0.0.0.0 --port 8866
+
