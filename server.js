@@ -2915,6 +2915,71 @@ app.delete('/api/files/:filename', (req, res) => {
   }
 });
 
+// Helper for Linux CPU temperatures (reads hwmon/coretemp/k10temp or thermal_zone)
+function getLinuxCpuTemperatures() {
+  let overallTemp = null;
+  let coreTemps = [];
+  try {
+    const hwmonDir = '/sys/class/hwmon';
+    if (fs.existsSync(hwmonDir)) {
+      const hwmons = fs.readdirSync(hwmonDir);
+      for (const hwmon of hwmons) {
+        const namePath = path.join(hwmonDir, hwmon, 'name');
+        if (fs.existsSync(namePath)) {
+          const driverName = fs.readFileSync(namePath, 'utf8').trim();
+          if (driverName === 'coretemp' || driverName === 'k10temp' || driverName === 'zenpower') {
+            const files = fs.readdirSync(path.join(hwmonDir, hwmon));
+            const tempFiles = files.filter(f => /^temp\d+_input$/.test(f)).sort();
+            const temps = tempFiles.map(file => {
+              try {
+                const raw = fs.readFileSync(path.join(hwmonDir, hwmon, file), 'utf8');
+                return Math.round(parseInt(raw, 10) / 1000);
+              } catch {
+                return null;
+              }
+            }).filter(t => t !== null);
+            
+            if (temps.length > 0) {
+              if (driverName === 'coretemp') {
+                overallTemp = temps[0];
+                coreTemps = temps.slice(1);
+              } else {
+                overallTemp = temps[0];
+                coreTemps = temps;
+              }
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    if (overallTemp === null) {
+      const thermalDir = '/sys/class/thermal';
+      if (fs.existsSync(thermalDir)) {
+        const zones = fs.readdirSync(thermalDir).filter(z => z.startsWith('thermal_zone'));
+        for (const zone of zones) {
+          const typePath = path.join(thermalDir, zone, 'type');
+          if (fs.existsSync(typePath)) {
+            const typeName = fs.readFileSync(typePath, 'utf8').trim().toLowerCase();
+            if (typeName.includes('cpu') || typeName.includes('pkg') || typeName.includes('acpi')) {
+              const tempPath = path.join(thermalDir, zone, 'temp');
+              if (fs.existsSync(tempPath)) {
+                const raw = fs.readFileSync(tempPath, 'utf8');
+                overallTemp = Math.round(parseInt(raw, 10) / 1000);
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error reading Linux CPU temperature:', e.message);
+  }
+  return { overallTemp, coreTemps };
+}
+
 // ─── System Status API ───────────────────────────────────────
 app.get('/api/system/status', (req, res) => {
   try {
@@ -2944,7 +3009,7 @@ app.get('/api/system/status', (req, res) => {
 
     let overallTemp = null;
     let coreTemps = [];
-    if (macosTemp) {
+    if (os.platform() === 'darwin' && macosTemp) {
       try {
         const data = macosTemp.temperature();
         if (data) {
@@ -2952,8 +3017,12 @@ app.get('/api/system/status', (req, res) => {
           coreTemps = data.cpuDieTemps ? data.cpuDieTemps.map(t => Math.round(t)) : [];
         }
       } catch (e) {
-        console.error('Error reading CPU temperature:', e.message);
+        console.error('Error reading macOS CPU temperature:', e.message);
       }
+    } else if (os.platform() === 'linux') {
+      const linuxTemps = getLinuxCpuTemperatures();
+      overallTemp = linuxTemps.overallTemp;
+      coreTemps = linuxTemps.coreTemps;
     }
 
     res.json({
