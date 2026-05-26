@@ -1658,9 +1658,19 @@ async function loadSystemStatus() {
         document.getElementById('diskDetails').textContent = `${disk.used || '0 GB'} / ${disk.size || '0 GB'} (剩餘 ${disk.avail || '0 GB'})`;
 
         // Render Power Draw
-        const powerObj = data.power || {};
-        const isEstLabel = powerObj.isEstimated ? ' (估算)' : '';
-        document.getElementById('systemPowerDraw').textContent = powerObj.value !== null ? `${powerObj.value} W${isEstLabel}` : 'N/A';
+        let powerVal = null;
+        let isEstimated = false;
+        if (data.power !== null && data.power !== undefined) {
+            if (typeof data.power === 'object') {
+                powerVal = data.power.value;
+                isEstimated = !!data.power.isEstimated;
+            } else {
+                powerVal = data.power;
+                isEstimated = false;
+            }
+        }
+        const isEstLabel = isEstimated ? ' (估算)' : '';
+        document.getElementById('systemPowerDraw').textContent = (powerVal !== null && powerVal !== undefined) ? `${powerVal} W${isEstLabel}` : 'N/A';
 
         // Render Core Grid details
         const coreGrid = document.getElementById('cpuCoreGrid');
@@ -1751,7 +1761,12 @@ function renderHistoryChart(history) {
     const labels = history.map(h => h.time);
     const cpuData = history.map(h => h.cpuOverall);
     const tempData = history.map(h => h.cpuTemp !== null ? h.cpuTemp : 0);
-    const powerData = history.map(h => h.power !== null ? h.power : 0);
+    const powerData = history.map(h => {
+        if (h.power === null || h.power === undefined) return 0;
+        if (typeof h.power === 'object') return h.power.value !== null ? h.power.value : 0;
+        const val = parseFloat(h.power);
+        return isNaN(val) ? 0 : val;
+    });
     const memData = history.map(h => h.memUsePercent);
 
     if (systemChart) {
