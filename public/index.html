@@ -47,6 +47,10 @@
         📁
         <span class="tooltip">檔案管理</span>
       </button>
+      <button class="nav-btn" data-page="system" id="nav-system" onclick="switchPage('system')">
+        🖥️
+        <span class="tooltip">系統狀態</span>
+      </button>
       <button class="nav-btn" data-page="settings" id="nav-settings" onclick="switchPage('settings')"
         style="margin-top:auto">
         ⚙️
@@ -502,6 +506,107 @@
             <div class="empty-state" style="padding:20px">
               <div class="icon">📭</div>
               <p>暫無檔案，在上方上傳第一個檔案吧！</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════════════════════════════════════════ -->
+      <!-- PAGE: System Status                            -->
+      <!-- ═══════════════════════════════════════════════ -->
+      <div id="page-system" class="page">
+        <div class="page-header">
+          <h1>🖥️ 伺服器狀態</h1>
+          <p>監控本機伺服器的硬碟容量、各 CPU 核心負載以及即時溫度</p>
+        </div>
+
+        <!-- System Overview Grid -->
+        <div class="system-grid">
+          <!-- CPU Status Card -->
+          <div class="card system-card">
+            <div class="card-header">
+              <div class="icon purple">⚡</div>
+              <div>
+                <h3>CPU 處理器</h3>
+                <p>整體負載與平均溫度</p>
+              </div>
+            </div>
+            <div class="metric-container">
+              <div class="metric-block">
+                <span class="metric-label">整體負載</span>
+                <span class="metric-value" id="cpuOverallLoad">0%</span>
+                <div class="progress-bar-container">
+                  <div class="progress-bar-fill" id="cpuOverallBar" style="width: 0%"></div>
+                </div>
+              </div>
+              <div class="metric-block">
+                <span class="metric-label">整體溫度</span>
+                <span class="metric-value" id="cpuOverallTemp">N/A</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Memory Status Card -->
+          <div class="card system-card">
+            <div class="card-header">
+              <div class="icon blue">🧠</div>
+              <div>
+                <h3>記憶體 (RAM)</h3>
+                <p>系統記憶體使用狀況</p>
+              </div>
+            </div>
+            <div class="metric-container">
+              <div class="metric-block">
+                <span class="metric-label">使用率</span>
+                <span class="metric-value" id="memUsePercent">0%</span>
+                <div class="progress-bar-container">
+                  <div class="progress-bar-fill" id="memUseBar" style="width: 0%"></div>
+                </div>
+              </div>
+              <div class="metric-block">
+                <span class="metric-label">容量詳情</span>
+                <span class="metric-value" id="memDetails" style="font-size: 14px; font-weight: normal; color: var(--text-secondary);">0 GB / 0 GB</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Disk Status Card -->
+          <div class="card system-card">
+            <div class="card-header">
+              <div class="icon green">💾</div>
+              <div>
+                <h3>硬碟容量</h3>
+                <p>系統主磁碟空間</p>
+              </div>
+            </div>
+            <div class="metric-container">
+              <div class="metric-block">
+                <span class="metric-label">已使用空間</span>
+                <span class="metric-value" id="diskUsePercent">0%</span>
+                <div class="progress-bar-container">
+                  <div class="progress-bar-fill" id="diskUseBar" style="width: 0%"></div>
+                </div>
+              </div>
+              <div class="metric-block">
+                <span class="metric-label">容量詳情</span>
+                <span class="metric-value" id="diskDetails" style="font-size: 14px; font-weight: normal; color: var(--text-secondary);">0 GB / 0 GB</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Detailed CPU Cores Matrix -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <div class="icon orange">📊</div>
+            <div>
+              <h3>CPU 各核心負載與溫度</h3>
+              <p>處理器核心即時數據</p>
+            </div>
+          </div>
+          <div class="core-grid" id="cpuCoreGrid">
+            <div class="empty-state" style="padding: 20px;">
+              <p>正在讀取核心數據...</p>
             </div>
           </div>
         </div>

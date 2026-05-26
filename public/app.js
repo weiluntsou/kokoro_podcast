@@ -13,6 +13,7 @@ let currentDirectVideoUrl = null;
 let currentScript = null;
 let selectedNoteIds = new Set();
 let currentPodcastId = null;
+let systemPollInterval = null;
 
 // ─── Init ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -61,6 +62,18 @@ function switchPage(page) {
     }
     if (page === 'files') {
         loadFilesList();
+    }
+
+    if (page === 'system') {
+        loadSystemStatus();
+        if (!systemPollInterval) {
+            systemPollInterval = setInterval(loadSystemStatus, 2000);
+        }
+    } else {
+        if (systemPollInterval) {
+            clearInterval(systemPollInterval);
+            systemPollInterval = null;
+        }
     }
 }
 
@@ -1604,5 +1617,79 @@ async function deleteFile(filename) {
         }
     } catch (e) {
         showToast(e.message, 'error');
+    }
+}
+
+// ─── System Status ────────────────────────────────────
+async function loadSystemStatus() {
+    try {
+        const res = await fetch(`${API}/api/system/status`);
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || '無法取得系統狀態');
+
+        // Render CPU overall
+        const cpu = data.cpu || {};
+        document.getElementById('cpuOverallLoad').textContent = `${cpu.overallLoad || 0}%`;
+        document.getElementById('cpuOverallBar').style.width = `${cpu.overallLoad || 0}%`;
+        document.getElementById('cpuOverallTemp').textContent = cpu.overallTemp ? `${cpu.overallTemp}°C` : 'N/A';
+
+        // Render Memory overall
+        const mem = data.memory || {};
+        document.getElementById('memUsePercent').textContent = `${mem.usePercent || 0}%`;
+        document.getElementById('memUseBar').style.width = `${mem.usePercent || 0}%`;
+        document.getElementById('memDetails').textContent = `${mem.used || '0 GB'} / ${mem.total || '0 GB'} (剩餘 ${mem.free || '0 GB'})`;
+
+        // Render Disk overall
+        const disk = data.disk || {};
+        document.getElementById('diskUsePercent').textContent = disk.usePercent || '0%';
+        document.getElementById('diskUseBar').style.width = disk.usePercent || '0%';
+        document.getElementById('diskDetails').textContent = `${disk.used || '0 GB'} / ${disk.size || '0 GB'} (剩餘 ${disk.avail || '0 GB'})`;
+
+        // Render Core Grid details
+        const coreGrid = document.getElementById('cpuCoreGrid');
+        if (cpu.coreLoads && cpu.coreLoads.length > 0) {
+            let coreHtml = '';
+            for (let i = 0; i < cpu.coreLoads.length; i++) {
+                const load = cpu.coreLoads[i];
+                const temp = cpu.coreTemps && cpu.coreTemps[i] !== undefined ? `${cpu.coreTemps[i]}°C` : 'N/A';
+                
+                // Color formatting based on load
+                let loadColor = 'var(--success)';
+                if (load > 70) loadColor = 'var(--danger)';
+                else if (load > 40) loadColor = 'var(--warning)';
+
+                // Color formatting based on temp
+                let tempColor = 'var(--text-secondary)';
+                if (cpu.coreTemps && cpu.coreTemps[i] > 80) tempColor = 'var(--danger)';
+                else if (cpu.coreTemps && cpu.coreTemps[i] > 65) tempColor = 'var(--warning)';
+
+                coreHtml += `
+                    <div class="core-item">
+                        <div class="core-header">
+                            <span class="core-name">核心 ${i + 1}</span>
+                            <span class="core-temp" style="color: ${tempColor}; font-weight: 600;">${temp}</span>
+                        </div>
+                        <div class="progress-bar-container" style="height: 6px; margin: 8px 0 4px 0;">
+                            <div class="progress-bar-fill" style="width: ${load}%; background: ${loadColor};"></div>
+                        </div>
+                        <div class="core-footer" style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted);">
+                            <span>負載</span>
+                            <span>${load}%</span>
+                        </div>
+                    </div>
+                `;
+            }
+            coreGrid.innerHTML = coreHtml;
+        } else {
+            coreGrid.innerHTML = `
+                <div class="empty-state" style="padding: 20px; grid-column: 1 / -1;">
+                    <p>尚無 CPU 核心監控數據</p>
+                </div>
+            `;
+        }
+    } catch (e) {
+        console.error('Fetch system status error:', e);
+        showToast('無法讀取伺服器狀態', 'error');
     }
 }

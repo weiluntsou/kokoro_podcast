@@ -6,6 +6,14 @@ const { execSync, exec } = require('child_process');
 const fetch = require('node-fetch');
 const FormData = require('form-data');
 const multer = require('multer');
+const os = require('os');
+
+let macosTemp = null;
+try {
+  macosTemp = require('macos-temperature-sensor');
+} catch (e) {
+  console.warn('macos-temperature-sensor could not be loaded:', e.message);
+}
 
 const app = express();
 const PORT = 3777;
@@ -26,6 +34,42 @@ const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 [DATA_DIR, VIDEOS_DIR, AUDIO_DIR, UPLOADS_DIR].forEach(dir => {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
+
+// ─── Background CPU Load Tracker ──────────────────────────────
+let lastCpuInfo = os.cpus();
+let cpuUsages = [];
+let cpuOverall = 0;
+
+setInterval(() => {
+  const currentCpuInfo = os.cpus();
+  const newUsages = [];
+  let totalDeltaIdle = 0;
+  let totalDeltaTotal = 0;
+
+  for (let i = 0; i < currentCpuInfo.length; i++) {
+    const start = lastCpuInfo[i];
+    const end = currentCpuInfo[i];
+    if (!start || !end) continue;
+
+    const startTotal = Object.values(start.times).reduce((a, b) => a + b, 0);
+    const endTotal = Object.values(end.times).reduce((a, b) => a + b, 0);
+
+    const deltaIdle = end.times.idle - start.times.idle;
+    const deltaTotal = endTotal - startTotal;
+
+    const usage = deltaTotal > 0 ? (1 - deltaIdle / deltaTotal) * 100 : 0;
+    newUsages.push(Math.round(usage));
+
+    totalDeltaIdle += deltaIdle;
+    totalDeltaTotal += deltaTotal;
+  }
+
+  if (newUsages.length > 0) {
+    cpuUsages = newUsages;
+    cpuOverall = totalDeltaTotal > 0 ? Math.round((1 - totalDeltaIdle / totalDeltaTotal) * 100) : 0;
+  }
+  lastCpuInfo = currentCpuInfo;
+}, 2000);
 
 // ─── Helpers ─────────────────────────────────────────────────
 function loadJSON(file, fallback = {}) {
@@ -2868,6 +2912,68 @@ app.delete('/api/files/:filename', (req, res) => {
     }
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ─── System Status API ───────────────────────────────────────
+app.get('/api/system/status', (req, res) => {
+  try {
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const memUsePercent = totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0;
+    
+    let diskInfo = { size: 'N/A', used: 'N/A', avail: 'N/A', usePercent: '0%' };
+    try {
+      const stdout = execSync('df -h /', { encoding: 'utf8', timeout: 5000 });
+      const lines = stdout.trim().split('\n');
+      if (lines.length >= 2) {
+        const parts = lines[1].split(/\s+/);
+        if (parts.length >= 5) {
+          diskInfo = {
+            size: parts[1],
+            used: parts[2],
+            avail: parts[3],
+            usePercent: parts[4]
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Error reading disk usage:', e.message);
+    }
+
+    let overallTemp = null;
+    let coreTemps = [];
+    if (macosTemp) {
+      try {
+        const data = macosTemp.temperature();
+        if (data) {
+          overallTemp = data.cpu ? Math.round(data.cpu) : null;
+          coreTemps = data.cpuDieTemps ? data.cpuDieTemps.map(t => Math.round(t)) : [];
+        }
+      } catch (e) {
+        console.error('Error reading CPU temperature:', e.message);
+      }
+    }
+
+    res.json({
+      success: true,
+      cpu: {
+        overallLoad: cpuOverall,
+        coreLoads: cpuUsages,
+        overallTemp,
+        coreTemps
+      },
+      memory: {
+        total: (totalMem / (1024 * 1024 * 1024)).toFixed(2) + ' GB',
+        used: (usedMem / (1024 * 1024 * 1024)).toFixed(2) + ' GB',
+        free: (freeMem / (1024 * 1024 * 1024)).toFixed(2) + ' GB',
+        usePercent: memUsePercent
+      },
+      disk: diskInfo
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
