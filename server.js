@@ -43,6 +43,8 @@ let cpuOverall = 0;
 let lastEnergyVal = null;
 let lastEnergyTime = Date.now();
 let systemPowerDraw = null;
+let systemHistory = [];
+const MAX_HISTORY_LEN = 30;
 
 function getLinuxPowerDraw() {
   try {
@@ -141,8 +143,54 @@ setInterval(() => {
   }
   lastCpuInfo = currentCpuInfo;
 
+  // Get current CPU temperature
+  let overallTemp = null;
+  if (os.platform() === 'darwin' && macosTemp) {
+    try {
+      const data = macosTemp.temperature();
+      if (data) {
+        overallTemp = data.cpu ? Math.round(data.cpu) : null;
+      }
+    } catch (e) { }
+  } else if (os.platform() === 'linux') {
+    try {
+      const linuxTemps = getLinuxCpuTemperatures();
+      overallTemp = linuxTemps.overallTemp;
+    } catch (e) { }
+  }
+
+  // Get current power draw (measured or estimated fallback)
+  let powerVal = null;
+  let isEstimated = false;
   if (os.platform() === 'linux') {
-    systemPowerDraw = getLinuxPowerDraw();
+    powerVal = getLinuxPowerDraw();
+  }
+  if (powerVal === null) {
+    const numCores = os.cpus().length || 4;
+    const pIdle = 5 + numCores * 1.5;
+    const pMax = 15 + numCores * 10;
+    powerVal = (pIdle + (pMax - pIdle) * (cpuOverall / 100)).toFixed(2);
+    isEstimated = true;
+  }
+  systemPowerDraw = powerVal;
+
+  // Get memory usage percentage
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const memUsePercent = totalMem > 0 ? Math.round((usedMem / totalMem) * 100) : 0;
+
+  // Push snapshot to history cache
+  systemHistory.push({
+    time: new Date().toLocaleTimeString('zh-TW', { hour12: false }),
+    cpuOverall,
+    cpuTemp: overallTemp,
+    memUsePercent,
+    power: parseFloat(powerVal),
+    isEstimated
+  });
+  if (systemHistory.length > MAX_HISTORY_LEN) {
+    systemHistory.shift();
   }
 }, 2000);
 
@@ -3107,6 +3155,12 @@ app.get('/api/system/status', (req, res) => {
       coreTemps = linuxTemps.coreTemps;
     }
 
+    let latestPower = { value: null, isEstimated: false };
+    if (systemHistory.length > 0) {
+      const lastItem = systemHistory[systemHistory.length - 1];
+      latestPower = { value: lastItem.power, isEstimated: lastItem.isEstimated };
+    }
+
     res.json({
       success: true,
       cpu: {
@@ -3122,7 +3176,8 @@ app.get('/api/system/status', (req, res) => {
         usePercent: memUsePercent
       },
       disk: diskInfo,
-      power: systemPowerDraw
+      power: latestPower,
+      history: systemHistory
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

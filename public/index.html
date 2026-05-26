@@ -7,6 +7,7 @@
   <meta name="description" content="X Post & Web Content Processor — 處理 X 貼文、Threads、Blog、新聞為中文筆記，生成 Podcast">
   <title>Smart Note Processor</title>
   <link rel="stylesheet" href="style.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 
 <body>
@@ -625,6 +626,20 @@
             <div class="empty-state" style="padding: 20px;">
               <p>正在讀取核心數據...</p>
             </div>
+          </div>
+        </div>
+
+        <!-- System History Chart -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <div class="icon blue">📈</div>
+            <div>
+              <h3>系統歷史數據趨勢</h3>
+              <p>最近 60 秒的資源與功耗變化記錄</p>
+            </div>
+          </div>
+          <div class="chart-container" style="position: relative; height: 300px; width: 100%;">
+            <canvas id="systemHistoryChart"></canvas>
           </div>
         </div>
       </div>

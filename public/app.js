@@ -14,6 +14,7 @@ let currentScript = null;
 let selectedNoteIds = new Set();
 let currentPodcastId = null;
 let systemPollInterval = null;
+let systemChart = null;
 
 // ─── Init ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
@@ -73,6 +74,10 @@ function switchPage(page) {
         if (systemPollInterval) {
             clearInterval(systemPollInterval);
             systemPollInterval = null;
+        }
+        if (systemChart) {
+            systemChart.destroy();
+            systemChart = null;
         }
     }
 }
@@ -1653,7 +1658,9 @@ async function loadSystemStatus() {
         document.getElementById('diskDetails').textContent = `${disk.used || '0 GB'} / ${disk.size || '0 GB'} (剩餘 ${disk.avail || '0 GB'})`;
 
         // Render Power Draw
-        document.getElementById('systemPowerDraw').textContent = data.power ? `${data.power} W` : 'N/A';
+        const powerObj = data.power || {};
+        const isEstLabel = powerObj.isEstimated ? ' (估算)' : '';
+        document.getElementById('systemPowerDraw').textContent = powerObj.value !== null ? `${powerObj.value} W${isEstLabel}` : 'N/A';
 
         // Render Core Grid details
         const coreGrid = document.getElementById('cpuCoreGrid');
@@ -1697,6 +1704,11 @@ async function loadSystemStatus() {
                 </div>
             `;
         }
+
+        // Render History Chart
+        if (data.history && data.history.length > 0) {
+            renderHistoryChart(data.history);
+        }
     } catch (e) {
         console.error('Fetch system status error:', e);
         showToast(`讀取狀態失敗: ${e.message}`, 'error');
@@ -1722,5 +1734,129 @@ async function loadSystemStatus() {
                 <p style="font-size: 12px; margin-top: 8px; color: var(--text-secondary);">請檢查終端機並重新啟動 node server.js 進程。</p>
             </div>
         `;
+    }
+}
+
+// ─── Render History Chart (Chart.js) ───────────────────
+function renderHistoryChart(history) {
+    const canvas = document.getElementById('systemHistoryChart');
+    if (!canvas) return;
+
+    if (typeof Chart === 'undefined') {
+        console.warn('Chart.js is not loaded yet.');
+        return;
+    }
+
+    const ctx = canvas.getContext('2d');
+    const labels = history.map(h => h.time);
+    const cpuData = history.map(h => h.cpuOverall);
+    const tempData = history.map(h => h.cpuTemp !== null ? h.cpuTemp : 0);
+    const powerData = history.map(h => h.power !== null ? h.power : 0);
+    const memData = history.map(h => h.memUsePercent);
+
+    if (systemChart) {
+        systemChart.data.labels = labels;
+        systemChart.data.datasets[0].data = cpuData;
+        systemChart.data.datasets[1].data = tempData;
+        systemChart.data.datasets[2].data = powerData;
+        systemChart.data.datasets[3].data = memData;
+        systemChart.update('none');
+    } else {
+        systemChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [
+                    {
+                        label: 'CPU 負載 (%)',
+                        data: cpuData,
+                        borderColor: '#6366f1',
+                        backgroundColor: 'rgba(99, 102, 241, 0.05)',
+                        tension: 0.2,
+                        borderWidth: 2,
+                        pointRadius: 1,
+                        fill: true
+                    },
+                    {
+                        label: 'CPU 溫度 (°C)',
+                        data: tempData,
+                        borderColor: '#ef4444',
+                        backgroundColor: 'transparent',
+                        tension: 0.2,
+                        borderWidth: 2,
+                        pointRadius: 1
+                    },
+                    {
+                        label: '功耗 (W)',
+                        data: powerData,
+                        borderColor: '#f59e0b',
+                        backgroundColor: 'rgba(245, 158, 11, 0.05)',
+                        tension: 0.2,
+                        borderWidth: 2,
+                        pointRadius: 1,
+                        fill: true
+                    },
+                    {
+                        label: '記憶體使用率 (%)',
+                        data: memData,
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'transparent',
+                        tension: 0.2,
+                        borderWidth: 2,
+                        pointRadius: 1
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        min: 0,
+                        grid: {
+                            color: 'rgba(255, 255, 255, 0.04)'
+                        },
+                        ticks: {
+                            color: '#8b92a8',
+                            font: {
+                                family: 'Inter, sans-serif',
+                                size: 11
+                            }
+                        }
+                    },
+                    x: {
+                        grid: {
+                            display: false
+                        },
+                        ticks: {
+                            color: '#8b92a8',
+                            font: {
+                                family: 'Inter, sans-serif',
+                                size: 10
+                            },
+                            maxTicksLimit: 8
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        position: 'top',
+                        labels: {
+                            color: '#e8eaf0',
+                            font: {
+                                family: 'Inter, sans-serif',
+                                size: 12
+                            },
+                            boxWidth: 12,
+                            padding: 15
+                        }
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false
+                    }
+                }
+            }
+        });
     }
 }
