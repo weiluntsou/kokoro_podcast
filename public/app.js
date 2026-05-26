@@ -1652,6 +1652,9 @@ async function loadSystemStatus() {
         document.getElementById('diskUseBar').style.width = disk.usePercent || '0%';
         document.getElementById('diskDetails').textContent = `${disk.used || '0 GB'} / ${disk.size || '0 GB'} (剩餘 ${disk.avail || '0 GB'})`;
 
+        // Render Power Draw
+        document.getElementById('systemPowerDraw').textContent = data.power ? `${data.power} W` : 'N/A';
+
         // Render Core Grid details
         const coreGrid = document.getElementById('cpuCoreGrid');
         if (cpu.coreLoads && cpu.coreLoads.length > 0) {
@@ -1710,6 +1713,8 @@ async function loadSystemStatus() {
         document.getElementById('diskUsePercent').textContent = 'N/A';
         document.getElementById('diskUseBar').style.width = '0%';
         document.getElementById('diskDetails').textContent = '連線失敗或需要重啟伺服器';
+        
+        document.getElementById('systemPowerDraw').textContent = 'N/A';
         
         document.getElementById('cpuCoreGrid').innerHTML = `
             <div class="empty-state" style="padding: 20px; grid-column: 1 / -1; color: var(--danger);">

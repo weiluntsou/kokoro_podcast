@@ -35,10 +35,81 @@ const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
-// ─── Background CPU Load Tracker ──────────────────────────────
+// ─── Background CPU & Power Tracker ───────────────────────────
 let lastCpuInfo = os.cpus();
 let cpuUsages = [];
 let cpuOverall = 0;
+
+let lastEnergyVal = null;
+let lastEnergyTime = Date.now();
+let systemPowerDraw = null;
+
+function getLinuxPowerDraw() {
+  try {
+    // 1. Check hwmon first (microwatts, common for AMD/Intel SoC)
+    const hwmonDir = '/sys/class/hwmon';
+    if (fs.existsSync(hwmonDir)) {
+      const hwmons = fs.readdirSync(hwmonDir);
+      for (const hwmon of hwmons) {
+        const powerFile = path.join(hwmonDir, hwmon, 'power1_input');
+        if (fs.existsSync(powerFile)) {
+          const raw = fs.readFileSync(powerFile, 'utf8').trim();
+          const microwatts = parseInt(raw, 10);
+          if (!isNaN(microwatts) && microwatts > 0) {
+            return (microwatts / 1000000).toFixed(2);
+          }
+        }
+      }
+    }
+
+    // 2. Check RAPL energy_uj
+    const raplPath = '/sys/class/powercap/intel-rapl/intel-rapl:0/energy_uj';
+    if (fs.existsSync(raplPath)) {
+      const now = Date.now();
+      const raw = fs.readFileSync(raplPath, 'utf8').trim();
+      const val = parseInt(raw, 10);
+      let power = null;
+      if (lastEnergyVal !== null) {
+        const deltaEnergy = val - lastEnergyVal;
+        const deltaTime = (now - lastEnergyTime) / 1000;
+        if (deltaTime > 0 && deltaEnergy >= 0) {
+          power = ((deltaEnergy / 1000000) / deltaTime).toFixed(2);
+        }
+      }
+      lastEnergyVal = val;
+      lastEnergyTime = now;
+      if (power !== null) return power;
+    }
+
+    // 3. Check Battery power_now
+    const batDir = '/sys/class/power_supply';
+    if (fs.existsSync(batDir)) {
+      const supplies = fs.readdirSync(batDir);
+      const bat = supplies.find(s => s.startsWith('BAT'));
+      if (bat) {
+        const powerNowPath = path.join(batDir, bat, 'power_now');
+        if (fs.existsSync(powerNowPath)) {
+          const raw = fs.readFileSync(powerNowPath, 'utf8').trim();
+          const microwatts = parseInt(raw, 10);
+          if (!isNaN(microwatts)) return (microwatts / 1000000).toFixed(2);
+        } else {
+          const voltPath = path.join(batDir, bat, 'voltage_now');
+          const currPath = path.join(batDir, bat, 'current_now');
+          if (fs.existsSync(voltPath) && fs.existsSync(currPath)) {
+            const volt = parseInt(fs.readFileSync(voltPath, 'utf8').trim(), 10);
+            const curr = parseInt(fs.readFileSync(currPath, 'utf8').trim(), 10);
+            if (!isNaN(volt) && !isNaN(curr)) {
+              return ((volt / 1000000) * (curr / 1000000)).toFixed(2);
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
 
 setInterval(() => {
   const currentCpuInfo = os.cpus();
@@ -69,6 +140,10 @@ setInterval(() => {
     cpuOverall = totalDeltaTotal > 0 ? Math.round((1 - totalDeltaIdle / totalDeltaTotal) * 100) : 0;
   }
   lastCpuInfo = currentCpuInfo;
+
+  if (os.platform() === 'linux') {
+    systemPowerDraw = getLinuxPowerDraw();
+  }
 }, 2000);
 
 // ─── Helpers ─────────────────────────────────────────────────
@@ -3046,7 +3121,8 @@ app.get('/api/system/status', (req, res) => {
         free: (freeMem / (1024 * 1024 * 1024)).toFixed(2) + ' GB',
         usePercent: memUsePercent
       },
-      disk: diskInfo
+      disk: diskInfo,
+      power: systemPowerDraw
     });
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
