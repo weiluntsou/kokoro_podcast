@@ -2990,10 +2990,17 @@ app.get('/api/system/status', (req, res) => {
     
     let diskInfo = { size: 'N/A', used: 'N/A', avail: 'N/A', usePercent: '0%' };
     try {
-      const stdout = execSync('df -h /', { encoding: 'utf8', timeout: 5000 });
+      const stdout = execSync('df -hP /', { encoding: 'utf8', timeout: 5000 });
       const lines = stdout.trim().split('\n');
-      if (lines.length >= 2) {
-        const parts = lines[1].split(/\s+/);
+      let targetLine = lines[1];
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].trim().endsWith(' /') || lines[i].trim().endsWith('/')) {
+          targetLine = lines[i];
+          break;
+        }
+      }
+      if (targetLine) {
+        const parts = targetLine.trim().split(/\s+/);
         if (parts.length >= 5) {
           diskInfo = {
             size: parts[1],

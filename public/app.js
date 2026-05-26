@@ -1624,7 +1624,13 @@ async function deleteFile(filename) {
 async function loadSystemStatus() {
     try {
         const res = await fetch(`${API}/api/system/status`);
-        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        if (!res.ok) throw new Error(`HTTP 錯誤狀態碼: ${res.status}`);
+        
+        const contentType = res.headers.get("content-type");
+        if (!contentType || !contentType.includes("application/json")) {
+            throw new Error("伺服器未回傳 JSON 格式（可能需要重新啟動 Node.js 伺服器進程）");
+        }
+        
         const data = await res.json();
         if (!data.success) throw new Error(data.error || '無法取得系統狀態');
 
@@ -1690,6 +1696,26 @@ async function loadSystemStatus() {
         }
     } catch (e) {
         console.error('Fetch system status error:', e);
-        showToast('無法讀取伺服器狀態', 'error');
+        showToast(`讀取狀態失敗: ${e.message}`, 'error');
+        
+        // Reset meters to N/A
+        document.getElementById('cpuOverallLoad').textContent = 'N/A';
+        document.getElementById('cpuOverallBar').style.width = '0%';
+        document.getElementById('cpuOverallTemp').textContent = 'N/A';
+        
+        document.getElementById('memUsePercent').textContent = 'N/A';
+        document.getElementById('memUseBar').style.width = '0%';
+        document.getElementById('memDetails').textContent = '連線失敗或需要重啟伺服器';
+        
+        document.getElementById('diskUsePercent').textContent = 'N/A';
+        document.getElementById('diskUseBar').style.width = '0%';
+        document.getElementById('diskDetails').textContent = '連線失敗或需要重啟伺服器';
+        
+        document.getElementById('cpuCoreGrid').innerHTML = `
+            <div class="empty-state" style="padding: 20px; grid-column: 1 / -1; color: var(--danger);">
+                <p>讀取失敗: ${e.message}</p>
+                <p style="font-size: 12px; margin-top: 8px; color: var(--text-secondary);">請檢查終端機並重新啟動 node server.js 進程。</p>
+            </div>
+        `;
     }
 }
