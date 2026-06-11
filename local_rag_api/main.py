@@ -197,6 +197,10 @@ async def explore_knowledge_base(
             selected_notes = all_notes[:5]
             
             chosen_keywords = []
+            ollama_failed = False
+            ollama_error_msg = None
+            method_used = "fallback"
+            
             if len(selected_notes) >= 3:
                 try:
                     log_api_step(f"Extracting keywords with gemma3:270m for {len(selected_notes)} notes")
@@ -204,7 +208,7 @@ async def explore_knowledge_base(
                     for idx, (title, text) in enumerate(selected_notes):
                         snippet = text[:150].replace("\n", " ")
                         prompt += f"筆記 {idx+1}: 標題:「{title}」, 內容節錄:「{snippet}...」\n"
-                    prompt += "\n請嚴格按照以下要求輸出：\n1. 只輸出這五個關鍵詞，並以半形逗號（,）分隔。\n2. 每個關鍵詞字數在 2 到 6 個字之內。\n3. 不要輸出任何其他解釋、引號、說明文字或標號。範例：React Hooks,快速排序,會議記錄,專案規劃,學習筆記"
+                    prompt += "\n請嚴格按照以下要求輸出：\n1. 只輸出這五個關鍵詞，並以半形逗號（,）分隔。\n2. 每個關鍵詞字數在 2 到 6 個字之內。\n3. 不要輸出任何額外的引號、清單編號或無關解釋。格式範例：React Hooks,快速排序,會議記錄,專案規劃,學習筆記"
                     
                     response = ollama.chat(model="gemma3:270m", messages=[
                         {'role': 'user', 'content': prompt}
@@ -212,21 +216,35 @@ async def explore_knowledge_base(
                     result_text = response['message']['content'].strip()
                     log_api_step(f"Ollama gemma3:270m raw response: {result_text}")
                     
-                    # 清理與分割
+                    # 強健解析器，適應各種列表與特殊符號格式
                     parsed_kws = []
-                    # 清理可能出現的引號、換行等特殊字元，保留中文、英文、逗號
-                    cleaned_result = re.sub(r'[^\w,\s\u4e00-\u9fa5]', '', result_text)
-                    cleaned_result = cleaned_result.replace('\n', ',')
-                    for kw in cleaned_result.split(","):
-                        kw_clean = kw.strip()
-                        if kw_clean and len(kw_clean) >= 2 and len(kw_clean) <= 15:
-                            parsed_kws.append(kw_clean)
+                    # 分割各種常見的分隔符：逗號、分號、換行等
+                    raw_items = re.split(r'[,，;\n\uff1b]', result_text)
+                    for item in raw_items:
+                        item = item.strip()
+                        # 移除列表序號與符號 (如 "1. ", "2) ", "- ", "* ")
+                        item = re.sub(r'^(?:\d+[\.\)]|[\-\*\u2022])\s*', '', item)
+                        # 移除包覆的外層引號或井字號
+                        item = re.sub(r'^[\"\'「『#\s]+|[\"\'」』#\s]+$', '', item)
+                        item = item.strip()
+                        if len(item) >= 2 and len(item) <= 15:
+                            # 確保包含字母或中文字，且不是純數字
+                            if re.search(r'[\w\u4e00-\u9fa5]', item) and not item.replace(".", "").isdigit():
+                                parsed_kws.append(item)
                     
                     if len(parsed_kws) >= 2:
                         chosen_keywords = list(dict.fromkeys(parsed_kws))[:5] # 去重
+                        method_used = "ollama"
                         log_api_step(f"Successfully extracted keywords using Ollama: {chosen_keywords}")
+                    else:
+                        ollama_failed = True
+                        ollama_error_msg = f"Parser returned too few keywords: {parsed_kws} from raw response: '{result_text}'"
                 except Exception as e_ollama:
+                    ollama_failed = True
+                    ollama_error_msg = str(e_ollama)
                     log_api_step(f"Ollama keyword extraction failed (falling back to titles): {e_ollama}")
+            else:
+                ollama_error_msg = f"Selected notes count ({len(selected_notes)}) is less than 3"
             
             # 備用方案：如果模型提取失敗或數量不足，直接使用筆記標題填補
             if len(chosen_keywords) < 5:
@@ -273,7 +291,14 @@ async def explore_knowledge_base(
             return {
                 "mode": "keywords",
                 "keywords": chosen_keywords,
-                "stats": stats
+                "stats": stats,
+                "debug": {
+                    "method": method_used,
+                    "ollama_failed": ollama_failed,
+                    "ollama_error": ollama_error_msg,
+                    "selected_notes_count": len(selected_notes),
+                    "selected_notes_titles": [title for title, _ in selected_notes]
+                }
             }
             
         # 情況 B：已提供關鍵字，對關鍵字進行向量相似度搜尋，回傳焦點與關聯筆記
