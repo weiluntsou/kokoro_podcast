@@ -129,6 +129,11 @@ def extract_metadata_from_payload(payload, collection_name):
             url = meta.get("url", meta.get("id", ""))
         if not source_path:
             source_path = meta.get("source", meta.get("full_path", ""))
+            
+    # 確保皆為字串且不為 None
+    title = str(title) if title is not None else ""
+    url = str(url) if url is not None else ""
+    source_path = str(source_path) if source_path is not None else ""
     
     # 如果還是沒有 title，從 source_path 的檔名取
     if not title and source_path:

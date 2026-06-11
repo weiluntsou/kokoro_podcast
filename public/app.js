@@ -1201,7 +1201,17 @@ async function loadRagExplore() {
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
         const res = await fetch(`${API}/api/rag/explore`, { signal: controller.signal });
         clearTimeout(timeoutId);
-        if (!res.ok) throw new Error('探索 API 無法連線');
+        if (!res.ok) {
+            const errText = await res.text();
+            let errorText = '探索 API 無法連線';
+            try {
+                const errJson = JSON.parse(errText);
+                errorText = errJson.error || errJson.detail || errText;
+            } catch (jsErr) {
+                errorText = errText || errorText;
+            }
+            throw new Error(errorText);
+        }
         const data = await res.json();
         
         // 渲染統計數據 (即使未選擇主題也要展示)
@@ -1274,7 +1284,17 @@ async function loadRagExploreDetail(keyword, clickedBtnElement) {
         const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
         const res = await fetch(`${API}/api/rag/explore?keyword=${encodeURIComponent(keyword)}`, { signal: controller.signal });
         clearTimeout(timeoutId);
-        if (!res.ok) throw new Error('探索 API 無法連線');
+        if (!res.ok) {
+            const errText = await res.text();
+            let errorText = '探索 API 無法連線';
+            try {
+                const errJson = JSON.parse(errText);
+                errorText = errJson.error || errJson.detail || errText;
+            } catch (jsErr) {
+                errorText = errText || errorText;
+            }
+            throw new Error(errorText);
+        }
         const data = await res.json();
         
         exploreDataCache = data;
