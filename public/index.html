@@ -400,12 +400,86 @@
       <!-- ═══════════════════════════════════════════════ -->
       <div id="page-rag" class="page">
         <div class="page-header">
-          <h1>🔍 知識庫查詢 (RAG)</h1>
-          <p>聯網查詢本機 Qdrant 向量資料庫，自動篩選相關內容並由 AI 生成回答</p>
+          <h1>📚 知識庫探索</h1>
+          <p>維基百科式探索你的向量知識庫 — 每次都有新發現</p>
         </div>
 
-        <!-- Query Input -->
-        <div class="card">
+        <!-- ───── Explore: Stats Overview ───── -->
+        <div class="explore-stats-grid" id="exploreStats">
+          <div class="explore-stat-card" id="statTotal">
+            <div class="stat-icon">📊</div>
+            <div class="stat-value" id="statTotalValue">—</div>
+            <div class="stat-label">文件總數</div>
+          </div>
+          <div class="explore-stat-card" id="statHedgedoc">
+            <div class="stat-icon">📝</div>
+            <div class="stat-value" id="statHedgedocValue">—</div>
+            <div class="stat-label">hedgedoc_notes</div>
+          </div>
+          <div class="explore-stat-card" id="statObsidian">
+            <div class="stat-icon">📓</div>
+            <div class="stat-value" id="statObsidianValue">—</div>
+            <div class="stat-label">obsidian_notes</div>
+          </div>
+        </div>
+
+        <!-- ───── Explore: Random Keyword Spotlight ───── -->
+        <div class="explore-hero" id="exploreHero">
+          <div class="explore-hero-loading" id="exploreHeroLoading">
+            <span class="spinner" style="width:24px;height:24px;border-width:3px;border-top-color:#a78bfa;"></span>
+            <span>正在探索知識庫...</span>
+          </div>
+          <div class="explore-hero-content" id="exploreHeroContent" style="display:none;">
+            <div class="explore-hero-top">
+              <div class="explore-hero-badge">🎲 隨機探索</div>
+              <div class="explore-hero-actions">
+                <button class="btn btn-secondary btn-sm" onclick="loadRagExplore()" title="換一個關鍵詞">🔄 換一個</button>
+                <button class="btn btn-primary btn-sm" onclick="useKeywordAsQuery()" title="用這個關鍵詞搜尋">🔍 深入查詢</button>
+              </div>
+            </div>
+            <h2 class="explore-hero-keyword" id="exploreKeyword">—</h2>
+            <div class="explore-hero-meta" id="exploreKeywordMeta"></div>
+            <div class="explore-hero-snippet" id="exploreKeywordSnippet"></div>
+            <div class="explore-hero-footer" id="exploreKeywordFooter"></div>
+          </div>
+          <!-- Empty state -->
+          <div class="explore-hero-empty" id="exploreHeroEmpty" style="display:none;">
+            <div style="font-size:48px; margin-bottom:12px;">📭</div>
+            <h3>知識庫尚無資料</h3>
+            <p style="color:var(--text-muted);">開始處理一些網頁內容，資料就會自動進入知識庫！</p>
+          </div>
+        </div>
+
+        <!-- ───── Explore: Related Content ───── -->
+        <div class="card" id="exploreRelatedCard" style="display:none;">
+          <div class="card-header">
+            <div class="icon" style="background:linear-gradient(135deg,#8b5cf6,#6366f1); color:white;">🔗</div>
+            <div>
+              <h3>相關連結</h3>
+              <p id="exploreRelatedSubtitle">與焦點關鍵詞最相關的內容</p>
+            </div>
+          </div>
+          <div class="related-list" id="exploreRelatedList">
+            <!-- Related items injected here -->
+          </div>
+        </div>
+
+        <!-- ───── Explore: Recent Entries ───── -->
+        <div class="card" id="exploreRecentCard" style="display:none;">
+          <div class="card-header">
+            <div class="icon" style="background:linear-gradient(135deg,#f59e0b,#f97316); color:white;">🕐</div>
+            <div>
+              <h3>近期加入</h3>
+              <p>最近收錄至知識庫的資料</p>
+            </div>
+          </div>
+          <div class="recent-scroll" id="exploreRecentScroll">
+            <!-- Recent cards injected here -->
+          </div>
+        </div>
+
+        <!-- ───── Original: Query Input ───── -->
+        <div class="card" style="margin-top: 8px;">
           <div class="card-header">
             <div class="icon purple">🧩</div>
             <div>

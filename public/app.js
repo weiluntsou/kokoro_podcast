@@ -64,6 +64,9 @@ function switchPage(page) {
     if (page === 'files') {
         loadFilesList();
     }
+    if (page === 'rag') {
+        loadRagExplore();
+    }
 
     if (page === 'system') {
         loadSystemStatus();
@@ -1170,6 +1173,179 @@ function handleLockScreenTouchEnd(e) {
     }
 }
 
+
+// ─── Knowledge Base Explore (Wikipedia-style) ─────────
+let exploreDataCache = null;
+
+async function loadRagExplore() {
+    const loading = document.getElementById('exploreHeroLoading');
+    const content = document.getElementById('exploreHeroContent');
+    const empty = document.getElementById('exploreHeroEmpty');
+    
+    // Show loading
+    loading.style.display = 'flex';
+    content.style.display = 'none';
+    empty.style.display = 'none';
+    
+    try {
+        const res = await fetch(`${API}/api/rag/explore`);
+        if (!res.ok) throw new Error('探索 API 無法連線');
+        const data = await res.json();
+        
+        exploreDataCache = data;
+        
+        if (!data.keyword || data.message) {
+            // Empty state
+            loading.style.display = 'none';
+            empty.style.display = 'block';
+            document.getElementById('exploreRelatedCard').style.display = 'none';
+            document.getElementById('exploreRecentCard').style.display = 'none';
+            return;
+        }
+        
+        renderExploreSection(data);
+        
+    } catch (e) {
+        console.error('Explore error:', e);
+        loading.style.display = 'none';
+        empty.style.display = 'block';
+        empty.querySelector('h3').textContent = '無法連線知識庫';
+        empty.querySelector('p').textContent = `錯誤: ${e.message}（請確認 RAG API 已啟動）`;
+    }
+}
+
+function renderExploreSection(data) {
+    const loading = document.getElementById('exploreHeroLoading');
+    const content = document.getElementById('exploreHeroContent');
+    const empty = document.getElementById('exploreHeroEmpty');
+    
+    loading.style.display = 'none';
+    content.style.display = 'block';
+    empty.style.display = 'none';
+    
+    // ── Stats ──
+    if (data.stats) {
+        let total = 0;
+        const hedgedocCount = data.stats['hedgedoc_notes'] || 0;
+        const obsidianCount = data.stats['obsidian_notes'] || 0;
+        total = hedgedocCount + obsidianCount;
+        
+        const totalEl = document.getElementById('statTotalValue');
+        const hedgedocEl = document.getElementById('statHedgedocValue');
+        const obsidianEl = document.getElementById('statObsidianValue');
+        
+        totalEl.textContent = total.toLocaleString();
+        hedgedocEl.textContent = hedgedocCount.toLocaleString();
+        obsidianEl.textContent = obsidianCount.toLocaleString();
+        
+        // Animate
+        [totalEl, hedgedocEl, obsidianEl].forEach(el => {
+            el.classList.remove('animate');
+            void el.offsetWidth; // force reflow
+            el.classList.add('animate');
+        });
+    }
+    
+    // ── Keyword Spotlight ──
+    document.getElementById('exploreKeyword').textContent = data.keyword;
+    
+    const doc = data.keyword_doc;
+    if (doc) {
+        const collClass = doc.collection === 'hedgedoc_notes' ? 'coll-badge-hedgedoc' : 'coll-badge-obsidian';
+        const collIcon = doc.collection === 'hedgedoc_notes' ? '📝' : '📓';
+        
+        document.getElementById('exploreKeywordMeta').innerHTML = `
+            <span class="coll-badge ${collClass}">${collIcon} ${escapeHtml(doc.collection)}</span>
+            <span style="font-size:12px; color:var(--text-muted);">📏 ${doc.text_length?.toLocaleString() || '?'} 字</span>
+            ${doc.source_path ? `<span style="font-size:12px; color:var(--text-muted);">📂 ${escapeHtml(doc.source_path.split('/').pop())}</span>` : ''}
+        `;
+        
+        document.getElementById('exploreKeywordSnippet').textContent = doc.snippet || '';
+        
+        let footerHtml = '';
+        if (doc.url && doc.url.startsWith('http')) {
+            footerHtml += `<a href="${escapeHtml(doc.url)}" target="_blank" class="keyword-tag" style="text-decoration:none;">🔗 開啟原文</a>`;
+        }
+        document.getElementById('exploreKeywordFooter').innerHTML = footerHtml;
+    }
+    
+    // ── Related Content ──
+    const relatedCard = document.getElementById('exploreRelatedCard');
+    const relatedList = document.getElementById('exploreRelatedList');
+    
+    if (data.related_docs && data.related_docs.length > 0) {
+        relatedCard.style.display = 'block';
+        document.getElementById('exploreRelatedSubtitle').textContent = `與「${data.keyword}」最相關的內容`;
+        
+        relatedList.innerHTML = data.related_docs.map((doc, i) => {
+            const collClass = doc.collection === 'hedgedoc_notes' ? 'coll-badge-hedgedoc' : 'coll-badge-obsidian';
+            const collIcon = doc.collection === 'hedgedoc_notes' ? '📝' : '📓';
+            const linkAttr = doc.url && doc.url.startsWith('http') 
+                ? `onclick="window.open('${escapeHtml(doc.url)}', '_blank')"` 
+                : `onclick="useKeywordAsQuery('${escapeHtml(doc.title).replace(/'/g, "\\'")}')"`;
+            
+            return `
+                <div class="related-item" ${linkAttr}>
+                    <div class="related-item-rank">${i + 1}</div>
+                    <div class="related-item-body">
+                        <div class="related-item-title">
+                            ${escapeHtml(doc.title)}
+                            <span class="coll-badge ${collClass}">${collIcon} ${escapeHtml(doc.collection)}</span>
+                            <span class="related-item-score">🎯 ${doc.score}</span>
+                        </div>
+                        <div class="related-item-snippet">${escapeHtml(doc.snippet)}</div>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } else {
+        relatedCard.style.display = 'none';
+    }
+    
+    // ── Recent Entries ──
+    const recentCard = document.getElementById('exploreRecentCard');
+    const recentScroll = document.getElementById('exploreRecentScroll');
+    
+    if (data.recent_docs && data.recent_docs.length > 0) {
+        recentCard.style.display = 'block';
+        
+        recentScroll.innerHTML = data.recent_docs.map(doc => {
+            const collClass = doc.collection === 'hedgedoc_notes' ? 'coll-badge-hedgedoc' : 'coll-badge-obsidian';
+            const collIcon = doc.collection === 'hedgedoc_notes' ? '📝' : '📓';
+            const clickAction = doc.url && doc.url.startsWith('http')
+                ? `onclick="window.open('${escapeHtml(doc.url)}', '_blank')"`
+                : `onclick="useKeywordAsQuery('${escapeHtml(doc.title).replace(/'/g, "\\'")}')"`;
+            
+            return `
+                <div class="recent-card" ${clickAction}>
+                    <div class="recent-card-title" title="${escapeHtml(doc.title)}">${escapeHtml(doc.title)}</div>
+                    <div class="recent-card-snippet">${escapeHtml(doc.snippet)}</div>
+                    <div class="recent-card-footer">
+                        <span class="coll-badge ${collClass}">${collIcon} ${escapeHtml(doc.collection)}</span>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    } else {
+        recentCard.style.display = 'none';
+    }
+}
+
+function useKeywordAsQuery(keyword) {
+    const queryInput = document.getElementById('ragQuery');
+    if (keyword) {
+        queryInput.value = keyword;
+    } else if (exploreDataCache && exploreDataCache.keyword) {
+        queryInput.value = exploreDataCache.keyword;
+    }
+    queryInput.focus();
+    queryInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    showToast('已填入關鍵詞，按下查詢即可搜尋', 'info');
+}
+
+function refreshRandomKeyword() {
+    loadRagExplore();
+}
 
 // ─── Local RAG Query ──────────────────────────────────
 async function askRag() {

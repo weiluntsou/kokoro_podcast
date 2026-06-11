@@ -2903,6 +2903,63 @@ app.post('/api/rag/ask', async (req, res) => {
   }
 });
 
+// ─── RAG Explore Proxy (Wikipedia-style) ────────────────────
+app.get('/api/rag/explore', async (req, res) => {
+  try {
+    const settings = getSettings();
+    const ragBaseUrl = (settings.ragUrl || 'http://localhost:8866').replace(/\/$/, '');
+    const collections = req.query.collections || 'hedgedoc_notes,obsidian_notes';
+    const ragRes = await fetch(`${ragBaseUrl}/explore?collections=${encodeURIComponent(collections)}`);
+    if (!ragRes.ok) {
+      const errText = await ragRes.text();
+      return res.status(ragRes.status).json({ error: errText });
+    }
+    const data = await ragRes.json();
+    
+    // Enrich URLs for HedgeDoc sources
+    if (settings.hedgedocUrl) {
+      const hedgedocBase = settings.hedgedocUrl.replace(/\/$/, '');
+      const enrichUrls = (docs) => {
+        if (!docs) return;
+        for (const doc of docs) {
+          if (doc.collection === 'hedgedoc_notes' && doc.url && !doc.url.startsWith('http')) {
+            doc.url = `${hedgedocBase}/${doc.url}`;
+          }
+        }
+      };
+      if (data.keyword_doc && data.keyword_doc.collection === 'hedgedoc_notes' && data.keyword_doc.url && !data.keyword_doc.url.startsWith('http')) {
+        data.keyword_doc.url = `${hedgedocBase}/${data.keyword_doc.url}`;
+      }
+      enrichUrls(data.related_docs);
+      enrichUrls(data.recent_docs);
+    }
+    
+    res.json(data);
+  } catch (error) {
+    console.error('RAG explore proxy error:', error.message);
+    res.status(500).json({ error: `知識庫探索失敗: ${error.message}` });
+  }
+});
+
+// ─── RAG Stats Proxy ────────────────────────────────────────
+app.get('/api/rag/stats', async (req, res) => {
+  try {
+    const settings = getSettings();
+    const ragBaseUrl = (settings.ragUrl || 'http://localhost:8866').replace(/\/$/, '');
+    const collections = req.query.collections || 'hedgedoc_notes,obsidian_notes';
+    const ragRes = await fetch(`${ragBaseUrl}/stats?collections=${encodeURIComponent(collections)}`);
+    if (!ragRes.ok) {
+      const errText = await ragRes.text();
+      return res.status(ragRes.status).json({ error: errText });
+    }
+    const data = await ragRes.json();
+    res.json(data);
+  } catch (error) {
+    console.error('RAG stats proxy error:', error.message);
+    res.status(500).json({ error: `知識庫統計失敗: ${error.message}` });
+  }
+});
+
 // ─── RAG Feedback Proxy ─────────────────────────────────────
 app.post('/api/rag/feedback', async (req, res) => {
   try {

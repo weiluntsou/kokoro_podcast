@@ -1,7 +1,8 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
+from qdrant_client.models import ScrollRequest, PointIdsList
 import ollama
 import torch
 # 限制 PyTorch 的 CPU 執行緒數量，避免高負載搶占 CPU 資源
@@ -12,6 +13,8 @@ import json
 import urllib.request
 import re
 import difflib
+import random
+from typing import List, Optional
 
 app = FastAPI(title="Local RAG API", description="使用 Qwen 與 Qdrant 的本地端知識庫查詢")
 
@@ -124,6 +127,154 @@ def extract_metadata_from_payload(payload, collection_name):
         title = payload.get("id", "未命名參考資料")
     
     return title, url, source_path
+
+@app.get("/explore")
+async def explore_knowledge_base(
+    collections: str = Query(default="hedgedoc_notes,obsidian_notes", description="逗號分隔的 collection 名稱")
+):
+    """知識庫探索 — 隨機抽取一個關鍵詞，並回傳相關資料"""
+    target_collections = [c.strip() for c in collections.split(",") if c.strip()]
+    
+    try:
+        # 1. 從所有 collection 中收集文件
+        all_docs = []
+        for coll in target_collections:
+            if not qdrant.collection_exists(collection_name=coll):
+                continue
+            # 使用 scroll 取得文件列表 (不帶向量，節省記憶體)
+            scroll_result = qdrant.scroll(
+                collection_name=coll,
+                limit=200,
+                with_payload=True,
+                with_vectors=False
+            )
+            for point in scroll_result[0]:
+                text = extract_text_from_payload(point.payload)
+                title, url, source_path = extract_metadata_from_payload(point.payload, coll)
+                if text and len(text.strip()) > 20 and title:
+                    all_docs.append({
+                        "id": str(point.id),
+                        "collection": coll,
+                        "title": title,
+                        "url": url,
+                        "source_path": source_path,
+                        "text": text,
+                        "text_length": len(text)
+                    })
+        
+        if not all_docs:
+            return {
+                "keyword": None,
+                "keyword_doc": None,
+                "related_docs": [],
+                "recent_docs": [],
+                "stats": {},
+                "message": "知識庫中尚無任何資料"
+            }
+        
+        # 2. 隨機選一個文件作為「今日焦點」
+        spotlight = random.choice(all_docs)
+        keyword = spotlight["title"]
+        
+        # 3. 用該關鍵詞做向量搜尋，找出最相關的文件
+        keyword_vector = embedder.encode(keyword).tolist()
+        related_docs = []
+        for coll in target_collections:
+            if not qdrant.collection_exists(collection_name=coll):
+                continue
+            res = qdrant.query_points(
+                collection_name=coll,
+                query=keyword_vector,
+                limit=8
+            )
+            for point in res.points:
+                doc_id = str(point.id)
+                if doc_id == spotlight["id"]:
+                    continue  # 排除自己
+                text = extract_text_from_payload(point.payload)
+                title, url, source_path = extract_metadata_from_payload(point.payload, coll)
+                if text and len(text.strip()) > 20:
+                    related_docs.append({
+                        "id": doc_id,
+                        "collection": coll,
+                        "title": title,
+                        "url": url,
+                        "source_path": source_path,
+                        "snippet": text[:300] + ("..." if len(text) > 300 else ""),
+                        "score": round(point.score, 4)
+                    })
+        
+        # 去重並按分數排序
+        seen_titles = set()
+        unique_related = []
+        for doc in sorted(related_docs, key=lambda x: x["score"], reverse=True):
+            if doc["title"] not in seen_titles:
+                seen_titles.add(doc["title"])
+                unique_related.append(doc)
+            if len(unique_related) >= 6:
+                break
+        
+        # 4. 取得近期加入的資料（按 ID 倒序，取最新的）
+        recent_docs = sorted(all_docs, key=lambda x: x["id"], reverse=True)[:8]
+        recent_formatted = []
+        for doc in recent_docs:
+            recent_formatted.append({
+                "id": doc["id"],
+                "collection": doc["collection"],
+                "title": doc["title"],
+                "url": doc["url"],
+                "source_path": doc["source_path"],
+                "snippet": doc["text"][:200] + ("..." if len(doc["text"]) > 200 else "")
+            })
+        
+        # 5. 統計
+        stats = {}
+        for coll in target_collections:
+            if qdrant.collection_exists(collection_name=coll):
+                info = qdrant.get_collection(collection_name=coll)
+                stats[coll] = info.points_count
+        
+        # 6. 焦點文件的完整摘要
+        keyword_doc = {
+            "id": spotlight["id"],
+            "collection": spotlight["collection"],
+            "title": spotlight["title"],
+            "url": spotlight["url"],
+            "source_path": spotlight["source_path"],
+            "snippet": spotlight["text"][:500] + ("..." if len(spotlight["text"]) > 500 else ""),
+            "text_length": spotlight["text_length"]
+        }
+        
+        return {
+            "keyword": keyword,
+            "keyword_doc": keyword_doc,
+            "related_docs": unique_related,
+            "recent_docs": recent_formatted,
+            "stats": stats
+        }
+    except Exception as e:
+        print(f"Explore error: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=f"探索知識庫時發生錯誤: {str(e)}")
+
+
+@app.get("/stats")
+async def get_stats(
+    collections: str = Query(default="hedgedoc_notes,obsidian_notes")
+):
+    """取得知識庫各 collection 的統計資訊"""
+    target_collections = [c.strip() for c in collections.split(",") if c.strip()]
+    stats = {}
+    total = 0
+    for coll in target_collections:
+        if qdrant.collection_exists(collection_name=coll):
+            info = qdrant.get_collection(collection_name=coll)
+            count = info.points_count
+            stats[coll] = count
+            total += count
+        else:
+            stats[coll] = 0
+    return {"stats": stats, "total": total}
+
 
 @app.post("/ask")
 async def ask_database(request: QueryRequest):
