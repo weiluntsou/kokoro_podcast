@@ -2909,9 +2909,16 @@ app.get('/api/rag/explore', async (req, res) => {
     const settings = getSettings();
     const ragBaseUrl = (settings.ragUrl || 'http://localhost:8866').replace(/\/$/, '');
     const collections = req.query.collections || 'hedgedoc_notes,obsidian_notes';
+    const keyword = req.query.keyword || '';
+    
+    let pythonUrl = `${ragBaseUrl}/explore?collections=${encodeURIComponent(collections)}`;
+    if (keyword) {
+      pythonUrl += `&keyword=${encodeURIComponent(keyword)}`;
+    }
+    
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
-    const ragRes = await fetch(`${ragBaseUrl}/explore?collections=${encodeURIComponent(collections)}`, { signal: controller.signal });
+    const ragRes = await fetch(pythonUrl, { signal: controller.signal });
     clearTimeout(timeout);
     if (!ragRes.ok) {
       const errText = await ragRes.text();

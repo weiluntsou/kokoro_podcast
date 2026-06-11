@@ -423,6 +423,21 @@
           </div>
         </div>
 
+        <!-- ───── Explore: Interactive Random Topics ───── -->
+        <div class="explore-topics-container" id="exploreTopicsContainer">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
+            <h4 style="margin:0; font-size:15px; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+              <span>🔍</span> 選擇一個隨機主題進行探索：
+            </h4>
+            <button class="btn btn-secondary btn-sm" onclick="loadRagExplore()" style="padding:4px 10px; font-size:12px; display:inline-flex; align-items:center; gap:4px;">
+              <span>🔄</span> 換一組主題
+            </button>
+          </div>
+          <div id="exploreTopicsList" style="display:flex; flex-wrap:wrap; gap:10px;">
+            <div style="color:var(--text-muted); font-size:13px; font-style:italic;">正在取得隨機主題...</div>
+          </div>
+        </div>
+
         <!-- ───── Explore: Random Keyword Spotlight ───── -->
         <div class="explore-hero" id="exploreHero">
           <div class="explore-hero-loading" id="exploreHeroLoading">

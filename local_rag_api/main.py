@@ -142,25 +142,23 @@ def extract_metadata_from_payload(payload, collection_name):
 
 @app.get("/explore")
 async def explore_knowledge_base(
-    collections: str = Query(default="hedgedoc_notes,obsidian_notes", description="逗號分隔的 collection 名稱")
+    collections: str = Query(default="hedgedoc_notes,obsidian_notes", description="逗號分隔的 collection 名稱"),
+    keyword: Optional[str] = Query(default=None, description="指定的探索關鍵字")
 ):
-    """知識庫探索 — 隨機抽取一個關鍵詞，並回傳相關資料"""
+    """知識庫探索 — 當未指定 keyword 時，回傳 5 個隨機主題關鍵字與統計數據；指定時，回傳該主題的關聯內容"""
     target_collections = [c.strip() for c in collections.split(",") if c.strip()]
     
     try:
         import time
         t0 = time.time()
-        log_api_step(f"===> Explore started: collections={target_collections}")
+        log_api_step(f"===> Explore started: collections={target_collections}, keyword={keyword}")
         
-        # 1. 先取得各 collection 的統計與文件數（輕量操作）
+        # 1. 取得各 collection 的統計與文件數（統計數據皆需要）
         stats = {}
         valid_collections = []
         for coll in target_collections:
-            log_api_step(f"  Step 1.1 checking collection exists: {coll}")
             if not qdrant.collection_exists(collection_name=coll):
-                log_api_step(f"  Step 1.1 collection does not exist: {coll}")
                 continue
-            log_api_step(f"  Step 1.2 getting collection stats: {coll}")
             info = qdrant.get_collection(collection_name=coll)
             count = info.points_count
             stats[coll] = count
@@ -168,164 +166,175 @@ async def explore_knowledge_base(
                 valid_collections.append((coll, count))
         
         t1 = time.time()
-        msg_step1 = f"===> Explore step1 (stats): {t1-t0:.2f}s, collections={stats}"
-        print(msg_step1, flush=True)
-        log_api_step(msg_step1)
+        log_api_step(f"Explore stats loaded in {t1-t0:.2f}s: {stats}")
         
-        if not valid_collections:
-            log_api_step("Explore ended: No valid collections or no points.")
+        # 情況 A：未提供關鍵字，回傳 5 個隨機關鍵字（從資料庫筆記標題中萃取）
+        if not keyword:
+            all_titles = []
+            for coll in target_collections:
+                if not qdrant.collection_exists(collection_name=coll):
+                    continue
+                # Scroll 部分文檔以獲取標題
+                scroll_res = qdrant.scroll(
+                    collection_name=coll,
+                    limit=35,
+                    with_payload=True,
+                    with_vectors=False
+                )
+                for point in scroll_res[0]:
+                    title, _, _ = extract_metadata_from_payload(point.payload, coll)
+                    if title:
+                        title = title.strip()
+                        # 過濾掉無意義標題
+                        if (len(title) >= 2 and len(title) <= 40 and 
+                            not title.replace(".", "").replace("-", "").isdigit() and 
+                            "untitled" not in title.lower() and 
+                            "未命名" not in title):
+                            all_titles.append(title)
+            
+            # 去重並隨機挑選 5 個
+            unique_titles = list(set(all_titles))
+            random.shuffle(unique_titles)
+            chosen_keywords = unique_titles[:5]
+            
+            # 若筆記數不足以提供 5 個，使用預設的主題填充
+            if len(chosen_keywords) < 5:
+                fallbacks = ["Kokoro", "AI Podcast", "知識庫", "筆記整理", "RAG 系統", "向量資料庫"]
+                for fb in fallbacks:
+                    if fb not in chosen_keywords:
+                        chosen_keywords.append(fb)
+                    if len(chosen_keywords) >= 5:
+                        break
+            
+            t2 = time.time()
+            log_api_step(f"Explore keywords loaded in {t2-t1:.2f}s: {chosen_keywords}")
             return {
-                "keyword": None,
-                "keyword_doc": None,
-                "related_docs": [],
-                "recent_docs": [],
-                "stats": stats,
-                "message": "知識庫中尚無任何資料"
+                "mode": "keywords",
+                "keywords": chosen_keywords,
+                "stats": stats
             }
-        
-        # 2. 隨機從一個 collection 中抽取少量文件（而非載入全部 200 筆）
-        # 選一個 collection（按文件數加權）
-        total_points = sum(c for _, c in valid_collections)
-        rand_val = random.randint(0, total_points - 1)
-        chosen_coll = valid_collections[0][0]
-        cumulative = 0
-        for coll, count in valid_collections:
-            cumulative += count
-            if rand_val < cumulative:
-                chosen_coll = coll
-                break
-        
-        log_api_step(f"  Step 2.1 scrolling collection: {chosen_coll}")
-        # Scroll 少量文件（只取 20 筆而非 200 筆）
-        scroll_result = qdrant.scroll(
-            collection_name=chosen_coll,
-            limit=20,
-            with_payload=True,
-            with_vectors=False
-        )
-        
-        t2 = time.time()
-        msg_step2 = f"===> Explore step2 (scroll {chosen_coll}, got {len(scroll_result[0])} docs): {t2-t1:.2f}s"
-        print(msg_step2, flush=True)
-        log_api_step(msg_step2)
-        
-        # 從 scroll 結果中篩選出有效文件
-        candidate_docs = []
-        for point in scroll_result[0]:
-            text = extract_text_from_payload(point.payload)
-            title, url, source_path = extract_metadata_from_payload(point.payload, chosen_coll)
-            if text and len(text.strip()) > 20 and title:
-                candidate_docs.append({
-                    "id": str(point.id),
-                    "collection": chosen_coll,
-                    "title": title,
-                    "url": url,
-                    "source_path": source_path,
-                    "text": text,
-                    "text_length": len(text)
-                })
-        
-        if not candidate_docs:
-            log_api_step("Explore ended: No candidate documents with valid content.")
-            return {
-                "keyword": None,
-                "keyword_doc": None,
-                "related_docs": [],
-                "recent_docs": [],
-                "stats": stats,
-                "message": "知識庫中尚無任何資料"
+            
+        # 情況 B：已提供關鍵字，對關鍵字進行向量相似度搜尋，回傳焦點與關聯筆記
+        else:
+            log_api_step(f"Encoding keyword: {keyword}")
+            keyword_vector = embedder.encode(keyword).tolist()
+            t2 = time.time()
+            log_api_step(f"Keyword encoded in {t2-t1:.2f}s")
+            
+            related_docs = []
+            for coll in target_collections:
+                if not qdrant.collection_exists(collection_name=coll):
+                    continue
+                # 跨 Collection 搜尋關聯筆記
+                res = qdrant.query_points(
+                    collection_name=coll,
+                    query=keyword_vector,
+                    limit=12
+                )
+                for point in res.points:
+                    doc_id = str(point.id)
+                    text = extract_text_from_payload(point.payload)
+                    title, url, source_path = extract_metadata_from_payload(point.payload, coll)
+                    if text and len(text.strip()) > 20:
+                        related_docs.append({
+                            "id": doc_id,
+                            "collection": coll,
+                            "title": title,
+                            "url": url,
+                            "source_path": source_path,
+                            "text": text,
+                            "score": point.score
+                        })
+            
+            t3 = time.time()
+            log_api_step(f"Query points completed in {t3-t2:.2f}s, found {len(related_docs)} items")
+            
+            if not related_docs:
+                log_api_step(f"No related documents found for keyword '{keyword}'")
+                return {
+                    "mode": "detail",
+                    "keyword": keyword,
+                    "keyword_doc": None,
+                    "related_docs": [],
+                    "recent_docs": [],
+                    "stats": stats,
+                    "message": f"找不到與「{keyword}」相關的文獻資料"
+                }
+            
+            # 按相關度排序
+            # 給 hedgedoc_notes 額外 5% 加權（偏好最新的 Hedgedoc 筆記）
+            related_docs.sort(key=lambda x: x["score"] * (1.05 if x["collection"] == "hedgedoc_notes" else 1.0), reverse=True)
+            
+            # 最頂端的一筆作為「今日焦點」
+            top_doc = related_docs[0]
+            keyword_doc = {
+                "id": top_doc["id"],
+                "collection": top_doc["collection"],
+                "title": top_doc["title"],
+                "url": top_doc["url"],
+                "source_path": top_doc["source_path"],
+                "snippet": top_doc["text"][:500] + ("..." if len(top_doc["text"]) > 500 else ""),
+                "text_length": len(top_doc["text"])
             }
-        
-        # 3. 隨機選一個文件作為「今日焦點」
-        spotlight = random.choice(candidate_docs)
-        keyword = spotlight["title"]
-        
-        log_api_step(f"  Step 3.1 encoding keyword: {keyword[:30]}")
-        # 4. 用該關鍵詞做向量搜尋，找出最相關的文件
-        keyword_vector = embedder.encode(keyword).tolist()
-        
-        t3 = time.time()
-        msg_step3 = f"===> Explore step3 (encode keyword '{keyword[:30]}'): {t3-t2:.2f}s"
-        print(msg_step3, flush=True)
-        log_api_step(msg_step3)
-        
-        related_docs = []
-        for coll in target_collections:
-            log_api_step(f"  Step 4.1 querying collection for related docs: {coll}")
-            if not qdrant.collection_exists(collection_name=coll):
-                continue
-            res = qdrant.query_points(
-                collection_name=coll,
-                query=keyword_vector,
-                limit=8
-            )
-            for point in res.points:
-                doc_id = str(point.id)
-                if doc_id == spotlight["id"]:
-                    continue  # 排除自己
-                text = extract_text_from_payload(point.payload)
-                title, url, source_path = extract_metadata_from_payload(point.payload, coll)
-                if text and len(text.strip()) > 20:
-                    related_docs.append({
-                        "id": doc_id,
-                        "collection": coll,
-                        "title": title,
-                        "url": url,
-                        "source_path": source_path,
-                        "snippet": text[:300] + ("..." if len(text) > 300 else ""),
-                        "score": round(point.score, 4)
+            
+            # 剩餘的做為「關聯文獻」，去重並限制數量最多 6 筆
+            seen_titles = set([top_doc["title"]])
+            unique_related = []
+            for doc in related_docs[1:]:
+                if doc["title"] not in seen_titles:
+                    seen_titles.add(doc["title"])
+                    unique_related.append({
+                        "id": doc["id"],
+                        "collection": doc["collection"],
+                        "title": doc["title"],
+                        "url": doc["url"],
+                        "source_path": doc["source_path"],
+                        "snippet": doc["text"][:300] + ("..." if len(doc["text"]) > 300 else ""),
+                        "score": round(doc["score"], 4)
                     })
-        
-        t4 = time.time()
-        msg_step4 = f"===> Explore step4 (query_points): {t4-t3:.2f}s, found {len(related_docs)} related"
-        print(msg_step4, flush=True)
-        log_api_step(msg_step4)
-        
-        # 去重並按分數排序
-        seen_titles = set()
-        unique_related = []
-        for doc in sorted(related_docs, key=lambda x: x["score"], reverse=True):
-            if doc["title"] not in seen_titles:
-                seen_titles.add(doc["title"])
-                unique_related.append(doc)
-            if len(unique_related) >= 6:
-                break
-        
-        # 5. 取得近期加入的資料（從已有的 scroll 結果中取，不再額外查詢）
-        recent_formatted = []
-        for doc in candidate_docs[:8]:
-            recent_formatted.append({
-                "id": doc["id"],
-                "collection": doc["collection"],
-                "title": doc["title"],
-                "url": doc["url"],
-                "source_path": doc["source_path"],
-                "snippet": doc["text"][:200] + ("..." if len(doc["text"]) > 200 else "")
-            })
-        
-        # 6. 焦點文件的完整摘要
-        keyword_doc = {
-            "id": spotlight["id"],
-            "collection": spotlight["collection"],
-            "title": spotlight["title"],
-            "url": spotlight["url"],
-            "source_path": spotlight["source_path"],
-            "snippet": spotlight["text"][:500] + ("..." if len(spotlight["text"]) > 500 else ""),
-            "text_length": spotlight["text_length"]
-        }
-        
-        t5 = time.time()
-        msg_done = f"===> Explore DONE total: {t5-t0:.2f}s"
-        print(msg_done, flush=True)
-        log_api_step(msg_done)
-        
-        return {
-            "keyword": keyword,
-            "keyword_doc": keyword_doc,
-            "related_docs": unique_related,
-            "recent_docs": recent_formatted,
-            "stats": stats
-        }
+                if len(unique_related) >= 6:
+                    break
+            
+            # 取得近期加入的資料（從該 collection 中 scroll 出來）
+            recent_formatted = []
+            try:
+                scroll_res = qdrant.scroll(
+                    collection_name=top_doc["collection"],
+                    limit=8,
+                    with_payload=True,
+                    with_vectors=False
+                )
+                for point in scroll_res[0]:
+                    if str(point.id) == top_doc["id"]:
+                        continue
+                    t = extract_text_from_payload(point.payload)
+                    ttl, u, sp = extract_metadata_from_payload(point.payload, top_doc["collection"])
+                    if t and ttl:
+                        recent_formatted.append({
+                            "id": str(point.id),
+                            "collection": top_doc["collection"],
+                            "title": ttl,
+                            "url": u,
+                            "source_path": sp,
+                            "snippet": t[:200] + ("..." if len(t) > 200 else "")
+                        })
+                    if len(recent_formatted) >= 6:
+                        break
+            except Exception as e_scroll:
+                log_api_step(f"Scroll recent error: {e_scroll}")
+            
+            t4 = time.time()
+            log_api_step(f"Explore details processed in {t4-t3:.2f}s. Total: {t4-t0:.2f}s")
+            
+            return {
+                "mode": "detail",
+                "keyword": keyword,
+                "keyword_doc": keyword_doc,
+                "related_docs": unique_related,
+                "recent_docs": recent_formatted,
+                "stats": stats
+            }
+            
     except Exception as e:
         msg_err = f"Explore error: {e}"
         print(msg_err, flush=True)

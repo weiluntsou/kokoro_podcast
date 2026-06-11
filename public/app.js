@@ -1178,14 +1178,23 @@ function handleLockScreenTouchEnd(e) {
 let exploreDataCache = null;
 
 async function loadRagExplore() {
-    const loading = document.getElementById('exploreHeroLoading');
-    const content = document.getElementById('exploreHeroContent');
-    const empty = document.getElementById('exploreHeroEmpty');
+    const topicsList = document.getElementById('exploreTopicsList');
+    const exploreHero = document.getElementById('exploreHero');
+    const relatedCard = document.getElementById('exploreRelatedCard');
+    const recentCard = document.getElementById('exploreRecentCard');
     
-    // Show loading
-    loading.style.display = 'flex';
-    content.style.display = 'none';
-    empty.style.display = 'none';
+    // Reset topics list to loading state
+    topicsList.innerHTML = `
+        <div style="color:var(--text-muted); font-size:13px; font-style:italic; display:flex; align-items:center; gap:8px;">
+            <span class="spinner" style="width:14px;height:14px;border-width:2px;border-top-color:#a78bfa;"></span>
+            正在取得隨機主題...
+        </div>
+    `;
+    
+    // Hide details area initially
+    exploreHero.style.display = 'none';
+    relatedCard.style.display = 'none';
+    recentCard.style.display = 'none';
     
     try {
         const controller = new AbortController();
@@ -1195,28 +1204,100 @@ async function loadRagExplore() {
         if (!res.ok) throw new Error('探索 API 無法連線');
         const data = await res.json();
         
+        // 渲染統計數據 (即使未選擇主題也要展示)
+        if (data.stats) {
+            let total = 0;
+            const hedgedocCount = data.stats['hedgedoc_notes'] || 0;
+            const obsidianCount = data.stats['obsidian_notes'] || 0;
+            total = hedgedocCount + obsidianCount;
+            
+            const totalEl = document.getElementById('statTotalValue');
+            const hedgedocEl = document.getElementById('statHedgedocValue');
+            const obsidianEl = document.getElementById('statObsidianValue');
+            
+            if (totalEl) totalEl.textContent = total.toLocaleString();
+            if (hedgedocEl) hedgedocEl.textContent = hedgedocCount.toLocaleString();
+            if (obsidianEl) obsidianEl.textContent = obsidianCount.toLocaleString();
+        }
+        
+        if (!data.keywords || data.keywords.length === 0) {
+            topicsList.innerHTML = `<div style="color:var(--text-muted); font-size:13px; font-style:italic;">知識庫中尚無任何資料</div>`;
+            return;
+        }
+        
+        // 渲染 5 個隨機主題按鈕
+        topicsList.innerHTML = '';
+        data.keywords.forEach(kw => {
+            const btn = document.createElement('button');
+            btn.className = 'topic-pill';
+            btn.innerHTML = `# <span>${escapeHtml(kw)}</span>`;
+            btn.onclick = () => loadRagExploreDetail(kw, btn);
+            topicsList.appendChild(btn);
+        });
+        
+    } catch (e) {
+        console.error('Explore load keywords error:', e);
+        const isTimeout = e.name === 'AbortError';
+        topicsList.innerHTML = `
+            <div style="color:#ef4444; font-size:13px; display:flex; align-items:center; gap:8px;">
+                ❌ ${isTimeout ? '取得主題逾時，請確認 RAG API 已啟動' : e.message}
+            </div>
+        `;
+    }
+}
+
+async function loadRagExploreDetail(keyword, clickedBtnElement) {
+    const exploreHero = document.getElementById('exploreHero');
+    const loading = document.getElementById('exploreHeroLoading');
+    const content = document.getElementById('exploreHeroContent');
+    const empty = document.getElementById('exploreHeroEmpty');
+    const relatedCard = document.getElementById('exploreRelatedCard');
+    const recentCard = document.getElementById('exploreRecentCard');
+    
+    // Highlight the clicked pill
+    const pills = document.querySelectorAll('#exploreTopicsList .topic-pill');
+    pills.forEach(p => p.classList.remove('active'));
+    if (clickedBtnElement) {
+        clickedBtnElement.classList.add('active');
+    }
+    
+    // Show exploreHero & loading state
+    exploreHero.style.display = 'block';
+    loading.style.display = 'flex';
+    content.style.display = 'none';
+    empty.style.display = 'none';
+    relatedCard.style.display = 'none';
+    recentCard.style.display = 'none';
+    
+    try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+        const res = await fetch(`${API}/api/rag/explore?keyword=${encodeURIComponent(keyword)}`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (!res.ok) throw new Error('探索 API 無法連線');
+        const data = await res.json();
+        
         exploreDataCache = data;
         
-        if (!data.keyword || data.message) {
-            // Empty state
+        if (!data.keyword || !data.keyword_doc) {
             loading.style.display = 'none';
             empty.style.display = 'block';
-            document.getElementById('exploreRelatedCard').style.display = 'none';
-            document.getElementById('exploreRecentCard').style.display = 'none';
+            empty.querySelector('h3').textContent = '無相關資料';
+            empty.querySelector('p').textContent = `找不到與「${keyword}」相關的文獻內容。`;
             return;
         }
         
         renderExploreSection(data);
         
     } catch (e) {
-        console.error('Explore error:', e);
+        console.error('Explore detail error:', e);
         loading.style.display = 'none';
         empty.style.display = 'block';
         const isTimeout = e.name === 'AbortError';
-        empty.querySelector('h3').textContent = isTimeout ? '連線逾時' : '無法連線知識庫';
+        empty.querySelector('h3').textContent = isTimeout ? '連線逾時' : '讀取焦點失敗';
         empty.querySelector('p').textContent = isTimeout
-            ? '知識庫 API 回應太慢或未啟動，請確認 RAG API 服務正常運作。'
-            : `錯誤: ${e.message}（請確認 RAG API 已啟動）`;
+            ? 'RAG API 處理此主題回應太慢，請重試或更換主題。'
+            : `錯誤: ${e.message}`;
     }
 }
 
