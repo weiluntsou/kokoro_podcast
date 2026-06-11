@@ -4,6 +4,9 @@ from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from qdrant_client.models import ScrollRequest, PointIdsList
 import ollama
+from ollama import Client as OllamaClient
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
+ollama_client = OllamaClient(host=OLLAMA_HOST)
 import torch
 # 限制 PyTorch 的 CPU 執行緒數量，避免高負載搶占 CPU 資源
 torch.set_num_threads(1)
@@ -210,7 +213,7 @@ async def explore_knowledge_base(
                         prompt += f"筆記 {idx+1}: 標題:「{title}」, 內容節錄:「{snippet}...」\n"
                     prompt += "\n請嚴格按照以下要求輸出：\n1. 只輸出這五個關鍵詞，並以半形逗號（,）分隔。\n2. 每個關鍵詞字數在 2 到 6 個字之內。\n3. 不要輸出任何額外的引號、清單編號或無關解釋。格式範例：React Hooks,快速排序,會議記錄,專案規劃,學習筆記"
                     
-                    response = ollama.chat(model="gemma3:270m", messages=[
+                    response = ollama_client.chat(model="gemma3:270m", messages=[
                         {'role': 'user', 'content': prompt}
                     ])
                     result_text = response['message']['content'].strip()
@@ -657,7 +660,7 @@ async def ask_database(request: QueryRequest):
         else:
             # 降級使用 Ollama
             print("==> Gemini API Key 未提供，已降級使用 Ollama 進行生成 (這可能需要數十秒到數分鐘)...", flush=True)
-            response = ollama.chat(model=model_to_use, messages=[
+            response = ollama_client.chat(model=model_to_use, messages=[
                 {'role': 'user', 'content': prompt}
             ])
             answer = response['message']['content']
