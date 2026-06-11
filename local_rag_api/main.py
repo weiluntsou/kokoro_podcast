@@ -45,6 +45,18 @@ except Exception as e:
     embedder = SentenceTransformer('all-MiniLM-L6-v2')
     EMBEDDER_MODEL = 'all-MiniLM-L6-v2'
 
+LOG_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'rag_api.log'))
+
+def log_api_step(msg: str):
+    try:
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+        os.makedirs(os.path.dirname(LOG_FILE), exist_ok=True)
+        with open(LOG_FILE, 'a', encoding='utf-8') as f:
+            f.write(f"[{timestamp}] {msg}\n")
+    except Exception as e:
+        print(f"Log error: {e}", flush=True)
+
 def load_feedback():
     """讀取使用者回饋以動態調整相關性門檻"""
     try:
@@ -138,13 +150,17 @@ async def explore_knowledge_base(
     try:
         import time
         t0 = time.time()
+        log_api_step(f"===> Explore started: collections={target_collections}")
         
         # 1. 先取得各 collection 的統計與文件數（輕量操作）
         stats = {}
         valid_collections = []
         for coll in target_collections:
+            log_api_step(f"  Step 1.1 checking collection exists: {coll}")
             if not qdrant.collection_exists(collection_name=coll):
+                log_api_step(f"  Step 1.1 collection does not exist: {coll}")
                 continue
+            log_api_step(f"  Step 1.2 getting collection stats: {coll}")
             info = qdrant.get_collection(collection_name=coll)
             count = info.points_count
             stats[coll] = count
@@ -152,9 +168,12 @@ async def explore_knowledge_base(
                 valid_collections.append((coll, count))
         
         t1 = time.time()
-        print(f"===> Explore step1 (stats): {t1-t0:.2f}s, collections={stats}", flush=True)
+        msg_step1 = f"===> Explore step1 (stats): {t1-t0:.2f}s, collections={stats}"
+        print(msg_step1, flush=True)
+        log_api_step(msg_step1)
         
         if not valid_collections:
+            log_api_step("Explore ended: No valid collections or no points.")
             return {
                 "keyword": None,
                 "keyword_doc": None,
@@ -176,6 +195,7 @@ async def explore_knowledge_base(
                 chosen_coll = coll
                 break
         
+        log_api_step(f"  Step 2.1 scrolling collection: {chosen_coll}")
         # Scroll 少量文件（只取 20 筆而非 200 筆）
         scroll_result = qdrant.scroll(
             collection_name=chosen_coll,
@@ -185,7 +205,9 @@ async def explore_knowledge_base(
         )
         
         t2 = time.time()
-        print(f"===> Explore step2 (scroll {chosen_coll}, got {len(scroll_result[0])} docs): {t2-t1:.2f}s", flush=True)
+        msg_step2 = f"===> Explore step2 (scroll {chosen_coll}, got {len(scroll_result[0])} docs): {t2-t1:.2f}s"
+        print(msg_step2, flush=True)
+        log_api_step(msg_step2)
         
         # 從 scroll 結果中篩選出有效文件
         candidate_docs = []
@@ -204,6 +226,7 @@ async def explore_knowledge_base(
                 })
         
         if not candidate_docs:
+            log_api_step("Explore ended: No candidate documents with valid content.")
             return {
                 "keyword": None,
                 "keyword_doc": None,
@@ -217,14 +240,18 @@ async def explore_knowledge_base(
         spotlight = random.choice(candidate_docs)
         keyword = spotlight["title"]
         
+        log_api_step(f"  Step 3.1 encoding keyword: {keyword[:30]}")
         # 4. 用該關鍵詞做向量搜尋，找出最相關的文件
         keyword_vector = embedder.encode(keyword).tolist()
         
         t3 = time.time()
-        print(f"===> Explore step3 (encode keyword '{keyword[:30]}'): {t3-t2:.2f}s", flush=True)
+        msg_step3 = f"===> Explore step3 (encode keyword '{keyword[:30]}'): {t3-t2:.2f}s"
+        print(msg_step3, flush=True)
+        log_api_step(msg_step3)
         
         related_docs = []
         for coll in target_collections:
+            log_api_step(f"  Step 4.1 querying collection for related docs: {coll}")
             if not qdrant.collection_exists(collection_name=coll):
                 continue
             res = qdrant.query_points(
@@ -250,7 +277,9 @@ async def explore_knowledge_base(
                     })
         
         t4 = time.time()
-        print(f"===> Explore step4 (query_points): {t4-t3:.2f}s, found {len(related_docs)} related", flush=True)
+        msg_step4 = f"===> Explore step4 (query_points): {t4-t3:.2f}s, found {len(related_docs)} related"
+        print(msg_step4, flush=True)
+        log_api_step(msg_step4)
         
         # 去重並按分數排序
         seen_titles = set()
@@ -286,7 +315,9 @@ async def explore_knowledge_base(
         }
         
         t5 = time.time()
-        print(f"===> Explore DONE total: {t5-t0:.2f}s", flush=True)
+        msg_done = f"===> Explore DONE total: {t5-t0:.2f}s"
+        print(msg_done, flush=True)
+        log_api_step(msg_done)
         
         return {
             "keyword": keyword,
@@ -296,7 +327,9 @@ async def explore_knowledge_base(
             "stats": stats
         }
     except Exception as e:
-        print(f"Explore error: {e}", flush=True)
+        msg_err = f"Explore error: {e}"
+        print(msg_err, flush=True)
+        log_api_step(msg_err)
         raise HTTPException(status_code=500, detail=f"探索知識庫時發生錯誤: {str(e)}")
 
 
