@@ -1188,7 +1188,10 @@ async function loadRagExplore() {
     empty.style.display = 'none';
     
     try {
-        const res = await fetch(`${API}/api/rag/explore`);
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+        const res = await fetch(`${API}/api/rag/explore`, { signal: controller.signal });
+        clearTimeout(timeoutId);
         if (!res.ok) throw new Error('探索 API 無法連線');
         const data = await res.json();
         
@@ -1209,8 +1212,11 @@ async function loadRagExplore() {
         console.error('Explore error:', e);
         loading.style.display = 'none';
         empty.style.display = 'block';
-        empty.querySelector('h3').textContent = '無法連線知識庫';
-        empty.querySelector('p').textContent = `錯誤: ${e.message}（請確認 RAG API 已啟動）`;
+        const isTimeout = e.name === 'AbortError';
+        empty.querySelector('h3').textContent = isTimeout ? '連線逾時' : '無法連線知識庫';
+        empty.querySelector('p').textContent = isTimeout
+            ? '知識庫 API 回應太慢或未啟動，請確認 RAG API 服務正常運作。'
+            : `錯誤: ${e.message}（請確認 RAG API 已啟動）`;
     }
 }
 

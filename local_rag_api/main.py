@@ -136,48 +136,93 @@ async def explore_knowledge_base(
     target_collections = [c.strip() for c in collections.split(",") if c.strip()]
     
     try:
-        # 1. 從所有 collection 中收集文件
-        all_docs = []
+        import time
+        t0 = time.time()
+        
+        # 1. 先取得各 collection 的統計與文件數（輕量操作）
+        stats = {}
+        valid_collections = []
         for coll in target_collections:
             if not qdrant.collection_exists(collection_name=coll):
                 continue
-            # 使用 scroll 取得文件列表 (不帶向量，節省記憶體)
-            scroll_result = qdrant.scroll(
-                collection_name=coll,
-                limit=200,
-                with_payload=True,
-                with_vectors=False
-            )
-            for point in scroll_result[0]:
-                text = extract_text_from_payload(point.payload)
-                title, url, source_path = extract_metadata_from_payload(point.payload, coll)
-                if text and len(text.strip()) > 20 and title:
-                    all_docs.append({
-                        "id": str(point.id),
-                        "collection": coll,
-                        "title": title,
-                        "url": url,
-                        "source_path": source_path,
-                        "text": text,
-                        "text_length": len(text)
-                    })
+            info = qdrant.get_collection(collection_name=coll)
+            count = info.points_count
+            stats[coll] = count
+            if count > 0:
+                valid_collections.append((coll, count))
         
-        if not all_docs:
+        t1 = time.time()
+        print(f"===> Explore step1 (stats): {t1-t0:.2f}s, collections={stats}", flush=True)
+        
+        if not valid_collections:
             return {
                 "keyword": None,
                 "keyword_doc": None,
                 "related_docs": [],
                 "recent_docs": [],
-                "stats": {},
+                "stats": stats,
                 "message": "知識庫中尚無任何資料"
             }
         
-        # 2. 隨機選一個文件作為「今日焦點」
-        spotlight = random.choice(all_docs)
+        # 2. 隨機從一個 collection 中抽取少量文件（而非載入全部 200 筆）
+        # 選一個 collection（按文件數加權）
+        total_points = sum(c for _, c in valid_collections)
+        rand_val = random.randint(0, total_points - 1)
+        chosen_coll = valid_collections[0][0]
+        cumulative = 0
+        for coll, count in valid_collections:
+            cumulative += count
+            if rand_val < cumulative:
+                chosen_coll = coll
+                break
+        
+        # Scroll 少量文件（只取 20 筆而非 200 筆）
+        scroll_result = qdrant.scroll(
+            collection_name=chosen_coll,
+            limit=20,
+            with_payload=True,
+            with_vectors=False
+        )
+        
+        t2 = time.time()
+        print(f"===> Explore step2 (scroll {chosen_coll}, got {len(scroll_result[0])} docs): {t2-t1:.2f}s", flush=True)
+        
+        # 從 scroll 結果中篩選出有效文件
+        candidate_docs = []
+        for point in scroll_result[0]:
+            text = extract_text_from_payload(point.payload)
+            title, url, source_path = extract_metadata_from_payload(point.payload, chosen_coll)
+            if text and len(text.strip()) > 20 and title:
+                candidate_docs.append({
+                    "id": str(point.id),
+                    "collection": chosen_coll,
+                    "title": title,
+                    "url": url,
+                    "source_path": source_path,
+                    "text": text,
+                    "text_length": len(text)
+                })
+        
+        if not candidate_docs:
+            return {
+                "keyword": None,
+                "keyword_doc": None,
+                "related_docs": [],
+                "recent_docs": [],
+                "stats": stats,
+                "message": "知識庫中尚無任何資料"
+            }
+        
+        # 3. 隨機選一個文件作為「今日焦點」
+        spotlight = random.choice(candidate_docs)
         keyword = spotlight["title"]
         
-        # 3. 用該關鍵詞做向量搜尋，找出最相關的文件
+        # 4. 用該關鍵詞做向量搜尋，找出最相關的文件
         keyword_vector = embedder.encode(keyword).tolist()
+        
+        t3 = time.time()
+        print(f"===> Explore step3 (encode keyword '{keyword[:30]}'): {t3-t2:.2f}s", flush=True)
+        
         related_docs = []
         for coll in target_collections:
             if not qdrant.collection_exists(collection_name=coll):
@@ -204,6 +249,9 @@ async def explore_knowledge_base(
                         "score": round(point.score, 4)
                     })
         
+        t4 = time.time()
+        print(f"===> Explore step4 (query_points): {t4-t3:.2f}s, found {len(related_docs)} related", flush=True)
+        
         # 去重並按分數排序
         seen_titles = set()
         unique_related = []
@@ -214,10 +262,9 @@ async def explore_knowledge_base(
             if len(unique_related) >= 6:
                 break
         
-        # 4. 取得近期加入的資料（按 ID 倒序，取最新的）
-        recent_docs = sorted(all_docs, key=lambda x: x["id"], reverse=True)[:8]
+        # 5. 取得近期加入的資料（從已有的 scroll 結果中取，不再額外查詢）
         recent_formatted = []
-        for doc in recent_docs:
+        for doc in candidate_docs[:8]:
             recent_formatted.append({
                 "id": doc["id"],
                 "collection": doc["collection"],
@@ -226,13 +273,6 @@ async def explore_knowledge_base(
                 "source_path": doc["source_path"],
                 "snippet": doc["text"][:200] + ("..." if len(doc["text"]) > 200 else "")
             })
-        
-        # 5. 統計
-        stats = {}
-        for coll in target_collections:
-            if qdrant.collection_exists(collection_name=coll):
-                info = qdrant.get_collection(collection_name=coll)
-                stats[coll] = info.points_count
         
         # 6. 焦點文件的完整摘要
         keyword_doc = {
@@ -244,6 +284,9 @@ async def explore_knowledge_base(
             "snippet": spotlight["text"][:500] + ("..." if len(spotlight["text"]) > 500 else ""),
             "text_length": spotlight["text_length"]
         }
+        
+        t5 = time.time()
+        print(f"===> Explore DONE total: {t5-t0:.2f}s", flush=True)
         
         return {
             "keyword": keyword,
