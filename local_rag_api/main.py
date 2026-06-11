@@ -173,13 +173,13 @@ async def explore_knowledge_base(
         t1 = time.time()
         log_api_step(f"Explore stats loaded in {t1-t0:.2f}s: {stats}")
         
-        # 情況 A：未提供關鍵字，回傳 5 個隨機關鍵字（從資料庫筆記標題中萃取）
+        # 情況 A：未提供關鍵字，回傳 5 個隨機關鍵字（使用 Ollama 模型輔助提取）
         if not keyword:
-            all_titles = []
+            all_notes = []
             for coll in target_collections:
                 if not qdrant.collection_exists(collection_name=coll):
                     continue
-                # Scroll 部分文檔以獲取標題
+                # Scroll 部分文檔以獲取標題與內容
                 scroll_res = qdrant.scroll(
                     collection_name=coll,
                     limit=35,
@@ -188,21 +188,75 @@ async def explore_knowledge_base(
                 )
                 for point in scroll_res[0]:
                     title, _, _ = extract_metadata_from_payload(point.payload, coll)
-                    if title:
-                        title = title.strip()
+                    text = extract_text_from_payload(point.payload)
+                    if title and text and len(text.strip()) > 20:
+                        all_notes.append((title.strip(), text.strip()))
+            
+            # 隨機打亂並選取最多 5 個文檔
+            random.shuffle(all_notes)
+            selected_notes = all_notes[:5]
+            
+            chosen_keywords = []
+            if len(selected_notes) >= 3:
+                try:
+                    log_api_step(f"Extracting keywords with gemma3:270m for {len(selected_notes)} notes")
+                    prompt = "你是一個專業的知識主題提取助手。請根據以下筆記的標題與內容片段，分別為每篇筆記提取出一個最具代表性的「核心關鍵詞」或「短主題」（例如：「React Hooks」、「機器學習」、「快速排序」、「會議記錄」）。\n\n"
+                    for idx, (title, text) in enumerate(selected_notes):
+                        snippet = text[:150].replace("\n", " ")
+                        prompt += f"筆記 {idx+1}: 標題:「{title}」, 內容節錄:「{snippet}...」\n"
+                    prompt += "\n請嚴格按照以下要求輸出：\n1. 只輸出這五個關鍵詞，並以半形逗號（,）分隔。\n2. 每個關鍵詞字數在 2 到 6 個字之內。\n3. 不要輸出任何其他解釋、引號、說明文字或標號。範例：React Hooks,快速排序,會議記錄,專案規劃,學習筆記"
+                    
+                    response = ollama.chat(model="gemma3:270m", messages=[
+                        {'role': 'user', 'content': prompt}
+                    ])
+                    result_text = response['message']['content'].strip()
+                    log_api_step(f"Ollama gemma3:270m raw response: {result_text}")
+                    
+                    # 清理與分割
+                    parsed_kws = []
+                    # 清理可能出現的引號、換行等特殊字元，保留中文、英文、逗號
+                    cleaned_result = re.sub(r'[^\w,\s\u4e00-\u9fa5]', '', result_text)
+                    cleaned_result = cleaned_result.replace('\n', ',')
+                    for kw in cleaned_result.split(","):
+                        kw_clean = kw.strip()
+                        if kw_clean and len(kw_clean) >= 2 and len(kw_clean) <= 15:
+                            parsed_kws.append(kw_clean)
+                    
+                    if len(parsed_kws) >= 2:
+                        chosen_keywords = list(dict.fromkeys(parsed_kws))[:5] # 去重
+                        log_api_step(f"Successfully extracted keywords using Ollama: {chosen_keywords}")
+                except Exception as e_ollama:
+                    log_api_step(f"Ollama keyword extraction failed (falling back to titles): {e_ollama}")
+            
+            # 備用方案：如果模型提取失敗或數量不足，直接使用筆記標題填補
+            if len(chosen_keywords) < 5:
+                for title, _ in selected_notes:
+                    if title and title not in chosen_keywords:
                         # 過濾掉無意義標題
                         if (len(title) >= 2 and len(title) <= 40 and 
                             not title.replace(".", "").replace("-", "").isdigit() and 
                             "untitled" not in title.lower() and 
                             "未命名" not in title):
-                            all_titles.append(title)
+                            chosen_keywords.append(title)
             
-            # 去重並隨機挑選 5 個
-            unique_titles = list(set(all_titles))
-            random.shuffle(unique_titles)
-            chosen_keywords = unique_titles[:5]
+            # 如果還是不夠，從其他文檔中挑選標題
+            if len(chosen_keywords) < 5:
+                for coll in target_collections:
+                    if not qdrant.collection_exists(collection_name=coll):
+                        continue
+                    scroll_res = qdrant.scroll(collection_name=coll, limit=30, with_payload=True, with_vectors=False)
+                    for point in scroll_res[0]:
+                        title, _, _ = extract_metadata_from_payload(point.payload, coll)
+                        if title and title not in chosen_keywords:
+                            if (len(title) >= 2 and len(title) <= 40 and 
+                                not title.replace(".", "").replace("-", "").isdigit() and 
+                                "untitled" not in title.lower() and 
+                                "未命名" not in title):
+                                chosen_keywords.append(title)
+                                if len(chosen_keywords) >= 5:
+                                    break
             
-            # 若筆記數不足以提供 5 個，使用預設的主題填充
+            # 如果依然不足 5 個，使用通用主題填補
             if len(chosen_keywords) < 5:
                 fallbacks = ["Kokoro", "AI Podcast", "知識庫", "筆記整理", "RAG 系統", "向量資料庫"]
                 for fb in fallbacks:
@@ -210,6 +264,9 @@ async def explore_knowledge_base(
                         chosen_keywords.append(fb)
                     if len(chosen_keywords) >= 5:
                         break
+            
+            # 確保最後回傳的關鍵字陣列去重且長度為 5
+            chosen_keywords = list(dict.fromkeys(chosen_keywords))[:5]
             
             t2 = time.time()
             log_api_step(f"Explore keywords loaded in {t2-t1:.2f}s: {chosen_keywords}")
