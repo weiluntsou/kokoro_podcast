@@ -1650,6 +1650,9 @@ app.delete('/api/videos/:filename', (req, res) => {
 // ─── Serve Audio ─────────────────────────────────────────────
 app.use('/api/audio', express.static(AUDIO_DIR));
 
+// Cache the last working Whisper endpoint to avoid probing every time
+let cachedWhisperEndpoint = null;
+
 // ─── Whisper Transcription ───────────────────────────────────
 app.post('/api/whisper/transcribe', async (req, res) => {
   try {
@@ -1688,32 +1691,135 @@ app.post('/api/whisper/transcribe', async (req, res) => {
     let lastData = null;
     let errorLog = [];
     let success = false;
+    let chosenEndpoint = null;
 
-    for (const endpoint of endpoints) {
-      const fullEndpointUrl = `${whisperBase}${endpoint}`;
+    // 1. Check if we have a cached working endpoint for this base URL
+    if (cachedWhisperEndpoint && cachedWhisperEndpoint.startsWith(whisperBase)) {
+      const endpoint = cachedWhisperEndpoint.substring(whisperBase.length);
+      console.log(`[whisper] 嘗試使用快取的端點: ${cachedWhisperEndpoint}`);
+      
       const form = new FormData();
-      // append the file stream and explicitly supply the filename string to ensure flask reads it as a file upload correctly
-      form.append('file', fs.createReadStream(audioFile), { filename: path.basename(audioFile) });
+      const fileParamName = (endpoint === '/asr') ? 'audio_file' : 'file';
+      form.append(fileParamName, fs.createReadStream(audioFile), { filename: path.basename(audioFile) });
       form.append('response_format', 'json');
 
+      let url = cachedWhisperEndpoint;
+      if (endpoint === '/asr') {
+        url += '?task=transcribe&output=json';
+      }
+
       try {
-        const res = await fetch(fullEndpointUrl, {
+        const res = await fetch(url, {
           method: 'POST',
           body: form,
           headers: form.getHeaders(),
-          timeout: 120000 // Give whisper some time to process
+          timeout: 300000 // Give whisper 5 minutes for the actual transcription
         });
 
         if (res.ok) {
           lastData = await res.json();
           success = true;
-          break; // Found working endpoint
+          chosenEndpoint = endpoint;
+          console.log(`[whisper] 快取端點轉錄成功`);
         } else {
           const errText = await res.text().catch(() => '');
-          errorLog.push(`[${fullEndpointUrl} 回傳 ${res.status}] ${errText.substring(0, 50)}`);
+          errorLog.push(`[快取端點 ${url} 回傳 ${res.status}] ${errText.substring(0, 50)}`);
+          // Clear cache on failure so we probe again
+          cachedWhisperEndpoint = null;
         }
       } catch (e) {
-        errorLog.push(`[${fullEndpointUrl} 錯誤] ${e.message}`);
+        errorLog.push(`[快取端點 ${url} 錯誤] ${e.message}`);
+        cachedWhisperEndpoint = null;
+      }
+    }
+
+    // 2. Probe endpoints if no success
+    if (!success) {
+      console.log(`[whisper] 開始探測 Whisper 端點...`);
+      const probeResults = await Promise.all(
+        endpoints.map(async (endpoint) => {
+          const fullEndpointUrl = `${whisperBase}${endpoint}`;
+          let exists = false;
+          let isSlow = false;
+          let status = null;
+          
+          try {
+            const form = new FormData();
+            const res = await fetch(fullEndpointUrl, {
+              method: 'POST',
+              body: form,
+              headers: form.getHeaders(),
+              timeout: 2000 // 2 seconds fast probe
+            });
+            status = res.status;
+            if (res.status !== 404) {
+              exists = true;
+            }
+          } catch (e) {
+            status = e.message || 'error';
+            if (e.message && (e.message.includes('timeout') || e.message.includes('ETIMEDOUT') || e.message.includes('aborted'))) {
+              exists = true;
+              isSlow = true;
+            }
+          }
+          return { endpoint, exists, isSlow, status };
+        })
+      );
+
+      // Filter and sort endpoints: put non-slow ones first
+      const validEndpoints = probeResults
+        .filter(r => r.exists)
+        .sort((a, b) => (a.isSlow ? 1 : 0) - (b.isSlow ? 1 : 0))
+        .map(r => r.endpoint);
+
+      console.log(`[whisper] 探測完成。可用端點: ${validEndpoints.join(', ') || '無'}`);
+
+      if (validEndpoints.length === 0) {
+        const isOffline = probeResults.every(r => r.status && (r.status.includes('ECONNREFUSED') || r.status.includes('ENOTFOUND')));
+        if (isOffline) {
+          throw new Error(`無法連線至 Whisper 伺服器 (${whisperBase})，請確認該服務已啟動且連接埠正確。`);
+        } else {
+          const details = probeResults.map(r => `${r.endpoint}: ${r.status}`).join(' | ');
+          throw new Error(`找不到有效的 Whisper 端點，伺服器可能未完全啟動或不支援此 API。詳細資料: ${details}`);
+        }
+      }
+
+      // Try the valid endpoints
+      for (const endpoint of validEndpoints) {
+        const fullEndpointUrl = `${whisperBase}${endpoint}`;
+        const form = new FormData();
+        const fileParamName = (endpoint === '/asr') ? 'audio_file' : 'file';
+        form.append(fileParamName, fs.createReadStream(audioFile), { filename: path.basename(audioFile) });
+        form.append('response_format', 'json');
+
+        let url = fullEndpointUrl;
+        if (endpoint === '/asr') {
+          url += '?task=transcribe&output=json';
+        }
+
+        try {
+          console.log(`[whisper] 正在嘗試端點: ${url}`);
+          const res = await fetch(url, {
+            method: 'POST',
+            body: form,
+            headers: form.getHeaders(),
+            timeout: 300000 // 5 minutes for actual transcription
+          });
+
+          if (res.ok) {
+            lastData = await res.json();
+            success = true;
+            chosenEndpoint = endpoint;
+            cachedWhisperEndpoint = fullEndpointUrl;
+            console.log(`[whisper] 成功使用端點: ${url}`);
+            break;
+          } else {
+            const errText = await res.text().catch(() => '');
+            errorLog.push(`[${url} 回傳 ${res.status}] ${errText.substring(0, 50)}`);
+          }
+        } catch (e) {
+          errorLog.push(`[${url} 錯誤] ${e.message}`);
+        }
       }
     }
 
