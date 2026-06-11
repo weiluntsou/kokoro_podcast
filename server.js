@@ -2915,6 +2915,12 @@ app.get('/api/rag/explore', async (req, res) => {
     if (keyword) {
       pythonUrl += `&keyword=${encodeURIComponent(keyword)}`;
     }
+    if (settings.geminiApiKey) {
+      pythonUrl += `&gemini_api_key=${encodeURIComponent(settings.geminiApiKey)}`;
+    }
+    if (settings.geminiModel) {
+      pythonUrl += `&gemini_model=${encodeURIComponent(settings.geminiModel)}`;
+    }
     
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 35000); // 35s timeout

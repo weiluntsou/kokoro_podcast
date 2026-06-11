@@ -60,6 +60,23 @@ def log_api_step(msg: str):
     except Exception as e:
         print(f"Log error: {e}", flush=True)
 
+def parse_response_to_keywords(text: str) -> List[str]:
+    parsed_kws = []
+    # 分割各種常見的分隔符：逗號、分號、換行等
+    raw_items = re.split(r'[,，;\n\uff1b]', text)
+    for item in raw_items:
+        item = item.strip()
+        # 移除列表序號與符號 (如 "1. ", "2) ", "- ", "* ")
+        item = re.sub(r'^(?:\d+[\.\)]|[\-\*\u2022])\s*', '', item)
+        # 移除包覆的外層引號或井字號
+        item = re.sub(r'^[\"\'「『#\s]+|[\"\'」』#\s]+$', '', item)
+        item = item.strip()
+        if len(item) >= 2 and len(item) <= 15:
+            # 確保包含字母或中文字，且不是純數字
+            if re.search(r'[\w\u4e00-\u9fa5]', item) and not item.replace(".", "").isdigit():
+                parsed_kws.append(item)
+    return list(dict.fromkeys(parsed_kws))[:5]
+
 def load_feedback():
     """讀取使用者回饋以動態調整相關性門檻"""
     try:
@@ -137,25 +154,32 @@ def extract_metadata_from_payload(payload, collection_name):
     title = str(title) if title is not None else ""
     url = str(url) if url is not None else ""
     source_path = str(source_path) if source_path is not None else ""
-    
-    # 如果還是沒有 title，從 source_path 的檔名取
-    if not title and source_path:
-        basename = source_path.rsplit("/", 1)[-1] if "/" in source_path else source_path
-        title = basename.replace(".md", "").strip()
-    
-    if not title:
-        title = payload.get("id", "未命名參考資料")
-    
     return title, url, source_path
 
 @app.get("/explore")
 async def explore_knowledge_base(
     collections: str = Query(default="hedgedoc_notes,obsidian_notes", description="逗號分隔的 collection 名稱"),
-    keyword: Optional[str] = Query(default=None, description="指定的探索關鍵字")
+    keyword: Optional[str] = Query(default=None, description="指定的探索關鍵字"),
+    gemini_api_key: Optional[str] = Query(default=None, description="Gemini API 金鑰"),
+    gemini_model: Optional[str] = Query(default=None, description="Gemini 模型名稱")
 ):
     """知識庫探索 — 當未指定 keyword 時，回傳 5 個隨機主題關鍵字與統計數據；指定時，回傳該主題的關聯內容"""
     target_collections = [c.strip() for c in collections.split(",") if c.strip()]
     
+    # 主動從 settings.json 載入 Gemini API 設定 (如果參數未提供)
+    if not gemini_api_key or not gemini_model:
+        try:
+            settings_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'settings.json'))
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings_data = json.load(f)
+                    if not gemini_api_key:
+                        gemini_api_key = settings_data.get("geminiApiKey", "")
+                    if not gemini_model:
+                        gemini_model = settings_data.get("geminiModel", "gemini-2.5-flash")
+        except Exception as e_settings:
+            log_api_step(f"Error loading settings in explore: {e_settings}")
+
     try:
         import time
         t0 = time.time()
@@ -176,7 +200,7 @@ async def explore_knowledge_base(
         t1 = time.time()
         log_api_step(f"Explore stats loaded in {t1-t0:.2f}s: {stats}")
         
-        # 情況 A：未提供關鍵字，回傳 5 個隨機關鍵字（使用 Ollama 模型輔助提取）
+        # 情況 A：未提供關鍵字，回傳 5 個隨機關鍵字（使用 LLM 模型輔助提取）
         if not keyword:
             all_notes = []
             for coll in target_collections:
@@ -200,56 +224,82 @@ async def explore_knowledge_base(
             selected_notes = all_notes[:5]
             
             chosen_keywords = []
+            method_used = "fallback"
+            gemini_failed = False
+            gemini_error_msg = None
             ollama_failed = False
             ollama_error_msg = None
-            method_used = "fallback"
             
             if len(selected_notes) >= 3:
-                try:
-                    log_api_step(f"Extracting keywords with gemma3:270m for {len(selected_notes)} notes")
-                    prompt = "你是一個專業的知識主題提取助手。請根據以下筆記的標題與內容片段，分別為每篇筆記提取出一個最具代表性的「核心關鍵詞」或「短主題」（例如：「React Hooks」、「機器學習」、「快速排序」、「會議記錄」）。\n\n"
-                    for idx, (title, text) in enumerate(selected_notes):
-                        snippet = text[:150].replace("\n", " ")
-                        prompt += f"筆記 {idx+1}: 標題:「{title}」, 內容節錄:「{snippet}...」\n"
-                    prompt += "\n請嚴格按照以下要求輸出：\n1. 只輸出這五個關鍵詞，並以半形逗號（,）分隔。\n2. 每個關鍵詞字數在 2 到 6 個字之內。\n3. 不要輸出任何額外的引號、清單編號或無關解釋。格式範例：React Hooks,快速排序,會議記錄,專案規劃,學習筆記"
-                    
-                    response = ollama_client.chat(model="gemma3:270m", messages=[
-                        {'role': 'user', 'content': prompt}
-                    ])
-                    result_text = response['message']['content'].strip()
-                    log_api_step(f"Ollama gemma3:270m raw response: {result_text}")
-                    
-                    # 強健解析器，適應各種列表與特殊符號格式
-                    parsed_kws = []
-                    # 分割各種常見的分隔符：逗號、分號、換行等
-                    raw_items = re.split(r'[,，;\n\uff1b]', result_text)
-                    for item in raw_items:
-                        item = item.strip()
-                        # 移除列表序號與符號 (如 "1. ", "2) ", "- ", "* ")
-                        item = re.sub(r'^(?:\d+[\.\)]|[\-\*\u2022])\s*', '', item)
-                        # 移除包覆的外層引號或井字號
-                        item = re.sub(r'^[\"\'「『#\s]+|[\"\'」』#\s]+$', '', item)
-                        item = item.strip()
-                        if len(item) >= 2 and len(item) <= 15:
-                            # 確保包含字母或中文字，且不是純數字
-                            if re.search(r'[\w\u4e00-\u9fa5]', item) and not item.replace(".", "").isdigit():
-                                parsed_kws.append(item)
-                    
-                    if len(parsed_kws) >= 2:
-                        chosen_keywords = list(dict.fromkeys(parsed_kws))[:5] # 去重
-                        method_used = "ollama"
-                        log_api_step(f"Successfully extracted keywords using Ollama: {chosen_keywords}")
-                    else:
+                # 建立 LLM Prompt
+                prompt = "你是一個專業的知識主題提取助手。請根據以下筆記的標題與內容片段，分別為每篇筆記提取出一個最具代表性的「核心關鍵詞」或「短主題」（例如：「React Hooks」、「機器學習」、「快速排序」、「會議記錄」）。\n\n"
+                for idx, (title, text) in enumerate(selected_notes):
+                    snippet = text[:150].replace("\n", " ")
+                    prompt += f"筆記 {idx+1}: 標題:「{title}」, 內容節錄:「{snippet}...」\n"
+                prompt += "\n請嚴格按照以下要求輸出：\n1. 只輸出這五個關鍵詞，並以半形逗號（,）分隔。\n2. 每個關鍵詞字數在 2 到 6 個字之內。\n3. 不要輸出 any 外部標題引號、清單編號或多餘說明文字。格式範例：React Hooks,快速排序,會議記錄,專案規劃,學習筆記"
+                
+                # 1. 優先嘗試 Gemini API (如果提供金鑰)
+                if gemini_api_key:
+                    try:
+                        g_model = gemini_model or "gemini-2.5-flash"
+                        log_api_step(f"Extracting keywords with Gemini API ({g_model})")
+                        
+                        url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_api_key}"
+                        payload = {
+                            "contents": [{"parts": [{"text": prompt}]}],
+                            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 200}
+                        }
+                        req = urllib.request.Request(
+                            url, 
+                            data=json.dumps(payload).encode('utf-8'), 
+                            headers={'Content-Type': 'application/json'}, 
+                            method='POST'
+                        )
+                        with urllib.request.urlopen(req, timeout=12) as resp:
+                            resp_data = json.loads(resp.read().decode('utf-8'))
+                            result_text = resp_data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                        
+                        log_api_step(f"Gemini API raw response: {result_text}")
+                        parsed_kws = parse_response_to_keywords(result_text)
+                        
+                        if len(parsed_kws) >= 2:
+                            chosen_keywords = parsed_kws
+                            method_used = "gemini"
+                            log_api_step(f"Successfully extracted keywords using Gemini: {chosen_keywords}")
+                        else:
+                            gemini_failed = True
+                            gemini_error_msg = f"Gemini parser returned too few keywords: {parsed_kws}"
+                    except Exception as e_gemini:
+                        gemini_failed = True
+                        gemini_error_msg = str(e_gemini)
+                        log_api_step(f"Gemini keyword extraction failed: {e_gemini}")
+                
+                # 2. 降級使用 Ollama (當 Gemini 未配置或失敗時)
+                if not chosen_keywords:
+                    try:
+                        log_api_step(f"Falling back to Ollama gemma3:270m")
+                        response = ollama_client.chat(model="gemma3:270m", messages=[
+                            {'role': 'user', 'content': prompt}
+                        ])
+                        result_text = response['message']['content'].strip()
+                        log_api_step(f"Ollama gemma3:270m raw response: {result_text}")
+                        parsed_kws = parse_response_to_keywords(result_text)
+                        
+                        if len(parsed_kws) >= 2:
+                            chosen_keywords = parsed_kws
+                            method_used = "ollama"
+                            log_api_step(f"Successfully extracted keywords using Ollama: {chosen_keywords}")
+                        else:
+                            ollama_failed = True
+                            ollama_error_msg = f"Ollama parser returned too few keywords: {parsed_kws}"
+                    except Exception as e_ollama:
                         ollama_failed = True
-                        ollama_error_msg = f"Parser returned too few keywords: {parsed_kws} from raw response: '{result_text}'"
-                except Exception as e_ollama:
-                    ollama_failed = True
-                    ollama_error_msg = str(e_ollama)
-                    log_api_step(f"Ollama keyword extraction failed (falling back to titles): {e_ollama}")
+                        ollama_error_msg = str(e_ollama)
+                        log_api_step(f"Ollama keyword extraction failed (falling back to titles): {e_ollama}")
             else:
-                ollama_error_msg = f"Selected notes count ({len(selected_notes)}) is less than 3"
+                gemini_error_msg = f"Selected notes count ({len(selected_notes)}) is less than 3"
             
-            # 備用方案：如果模型提取失敗或數量不足，直接使用筆記標題填補
+            # 備用方案：如果模型提取皆失敗或數量不足，直接使用筆記標題填補
             if len(chosen_keywords) < 5:
                 for title, _ in selected_notes:
                     if title and title not in chosen_keywords:
@@ -297,6 +347,8 @@ async def explore_knowledge_base(
                 "stats": stats,
                 "debug": {
                     "method": method_used,
+                    "gemini_failed": gemini_failed,
+                    "gemini_error": gemini_error_msg,
                     "ollama_failed": ollama_failed,
                     "ollama_error": ollama_error_msg,
                     "selected_notes_count": len(selected_notes),
