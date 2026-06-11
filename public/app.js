@@ -1198,7 +1198,7 @@ async function loadRagExplore() {
     
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 40000); // 40s timeout
         const res = await fetch(`${API}/api/rag/explore`, { signal: controller.signal });
         clearTimeout(timeoutId);
         if (!res.ok) {
@@ -1281,7 +1281,7 @@ async function loadRagExploreDetail(keyword, clickedBtnElement) {
     
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+        const timeoutId = setTimeout(() => controller.abort(), 40000); // 40s timeout
         const res = await fetch(`${API}/api/rag/explore?keyword=${encodeURIComponent(keyword)}`, { signal: controller.signal });
         clearTimeout(timeoutId);
         if (!res.ok) {

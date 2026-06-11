@@ -2917,7 +2917,7 @@ app.get('/api/rag/explore', async (req, res) => {
     }
     
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
+    const timeout = setTimeout(() => controller.abort(), 35000); // 35s timeout
     const ragRes = await fetch(pythonUrl, { signal: controller.signal });
     clearTimeout(timeout);
     if (!ragRes.ok) {
