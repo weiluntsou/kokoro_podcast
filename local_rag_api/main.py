@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from qdrant_client.models import ScrollRequest, PointIdsList
+import os
 import ollama
 from ollama import Client as OllamaClient
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
@@ -11,7 +12,6 @@ import torch
 # 限制 PyTorch 的 CPU 執行緒數量，避免高負載搶占 CPU 資源
 torch.set_num_threads(1)
 from sentence_transformers import SentenceTransformer
-import os
 import json
 import urllib.request
 import re
