@@ -401,7 +401,7 @@
       <div id="page-rag" class="page">
         <div class="page-header">
           <h1>📚 知識庫探索</h1>
-          <p>維基百科式探索你的向量知識庫 — 每次都有新發現</p>
+          <p>每日 AI 合成分析，發現知識庫中的隱藏連結與模式</p>
         </div>
 
         <!-- ───── Explore: Stats Overview ───── -->
@@ -423,75 +423,42 @@
           </div>
         </div>
 
-        <!-- ───── Explore: Interactive Random Topics ───── -->
-        <div class="explore-topics-container" id="exploreTopicsContainer">
-          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; flex-wrap:wrap; gap:8px;">
-            <h4 style="margin:0; font-size:15px; font-weight:600; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
-              <span>🔍</span> 選擇一個隨機主題進行探索：
-            </h4>
-            <button class="btn btn-secondary btn-sm" onclick="loadRagExplore()" style="padding:4px 10px; font-size:12px; display:inline-flex; align-items:center; gap:4px;">
-              <span>🔄</span> 換一組主題
-            </button>
+        <!-- ───── Daily Synthesis Summary ───── -->
+        <div id="dailySynthesisContainer">
+          <div class="synthesis-header">
+            <div class="synthesis-header-left">
+              <h4>🧠 每日合成摘要</h4>
+              <span class="synthesis-date-badge" id="synthesisDateBadge">📅 載入中...</span>
+              <span class="synthesis-cached-badge" id="synthesisCachedBadge" style="display:none;">⚡ 快取</span>
+            </div>
+            <div style="display:flex; gap:8px; align-items:center;">
+              <span id="synthesisNotesCount" style="font-size:12px; color:var(--text-muted);"></span>
+              <button class="btn btn-secondary btn-sm" onclick="loadDailySynthesis(true)" style="padding:4px 12px; font-size:12px; display:inline-flex; align-items:center; gap:4px;">
+                <span>🔄</span> 重新分析
+              </button>
+            </div>
           </div>
-          <div id="exploreTopicsList" style="display:flex; flex-wrap:wrap; gap:10px;">
-            <div style="color:var(--text-muted); font-size:13px; font-style:italic;">正在取得隨機主題...</div>
+          
+          <!-- Loading State -->
+          <div class="synthesis-loading" id="synthesisLoading">
+            <span class="spinner" style="width:28px;height:28px;border-width:3px;border-top-color:#8b5cf6;"></span>
+            <div class="synthesis-loading-text">🧠 正在分析知識庫筆記...</div>
+            <div class="synthesis-loading-subtext">AI 正在找出隱藏的連結、模式與矛盾</div>
+          </div>
+          
+          <!-- Error State -->
+          <div class="synthesis-error" id="synthesisError" style="display:none;">
+            <div style="font-size:40px;">⚠️</div>
+            <div id="synthesisErrorText" style="font-size:14px;">無法載入合成摘要</div>
+            <button class="btn btn-secondary btn-sm" onclick="loadDailySynthesis(true)">🔄 重試</button>
+          </div>
+          
+          <!-- Synthesis Grid (4 cards) -->
+          <div class="synthesis-grid" id="synthesisGrid" style="display:none;">
+            <!-- Cards will be injected by JavaScript -->
           </div>
         </div>
 
-        <!-- ───── Explore: Random Keyword Spotlight ───── -->
-        <div class="explore-hero" id="exploreHero">
-          <div class="explore-hero-loading" id="exploreHeroLoading">
-            <span class="spinner" style="width:24px;height:24px;border-width:3px;border-top-color:#a78bfa;"></span>
-            <span>正在探索知識庫...</span>
-          </div>
-          <div class="explore-hero-content" id="exploreHeroContent" style="display:none;">
-            <div class="explore-hero-top">
-              <div class="explore-hero-badge">🎲 隨機探索</div>
-              <div class="explore-hero-actions">
-                <button class="btn btn-secondary btn-sm" onclick="loadRagExplore()" title="換一個關鍵詞">🔄 換一個</button>
-                <button class="btn btn-primary btn-sm" onclick="useKeywordAsQuery()" title="用這個關鍵詞搜尋">🔍 深入查詢</button>
-              </div>
-            </div>
-            <h2 class="explore-hero-keyword" id="exploreKeyword">—</h2>
-            <div class="explore-hero-meta" id="exploreKeywordMeta"></div>
-            <div class="explore-hero-snippet" id="exploreKeywordSnippet"></div>
-            <div class="explore-hero-footer" id="exploreKeywordFooter"></div>
-          </div>
-          <!-- Empty state -->
-          <div class="explore-hero-empty" id="exploreHeroEmpty" style="display:none;">
-            <div style="font-size:48px; margin-bottom:12px;">📭</div>
-            <h3>知識庫尚無資料</h3>
-            <p style="color:var(--text-muted);">開始處理一些網頁內容，資料就會自動進入知識庫！</p>
-          </div>
-        </div>
-
-        <!-- ───── Explore: Related Content ───── -->
-        <div class="card" id="exploreRelatedCard" style="display:none;">
-          <div class="card-header">
-            <div class="icon" style="background:linear-gradient(135deg,#8b5cf6,#6366f1); color:white;">🔗</div>
-            <div>
-              <h3>相關連結</h3>
-              <p id="exploreRelatedSubtitle">與焦點關鍵詞最相關的內容</p>
-            </div>
-          </div>
-          <div class="related-list" id="exploreRelatedList">
-            <!-- Related items injected here -->
-          </div>
-        </div>
-
-        <!-- ───── Explore: Recent Entries ───── -->
-        <div class="card" id="exploreRecentCard" style="display:none;">
-          <div class="card-header">
-            <div class="icon" style="background:linear-gradient(135deg,#f59e0b,#f97316); color:white;">🕐</div>
-            <div>
-              <h3>近期加入</h3>
-              <p>最近收錄至知識庫的資料</p>
-            </div>
-          </div>
-          <div class="recent-scroll" id="exploreRecentScroll">
-            <!-- Recent cards injected here -->
-          </div>
-        </div>
 
         <!-- ───── Original: Query Input ───── -->
         <div class="card" style="margin-top: 8px;">

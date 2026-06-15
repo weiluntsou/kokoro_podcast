@@ -2957,6 +2957,38 @@ app.get('/api/rag/explore', async (req, res) => {
   }
 });
 
+// ─── RAG Daily Synthesis Proxy ──────────────────────────────
+app.get('/api/rag/daily-synthesis', async (req, res) => {
+  try {
+    const settings = getSettings();
+    const ragBaseUrl = (settings.ragUrl || 'http://localhost:8866').replace(/\/$/, '');
+    const collections = req.query.collections || 'hedgedoc_notes,obsidian_notes';
+    const force = req.query.force === 'true' ? 'true' : 'false';
+    
+    let pythonUrl = `${ragBaseUrl}/daily-synthesis?collections=${encodeURIComponent(collections)}&force=${force}`;
+    if (settings.geminiApiKey) {
+      pythonUrl += `&gemini_api_key=${encodeURIComponent(settings.geminiApiKey)}`;
+    }
+    if (settings.geminiModel) {
+      pythonUrl += `&gemini_model=${encodeURIComponent(settings.geminiModel)}`;
+    }
+    
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 70000); // 70s timeout
+    const ragRes = await fetch(pythonUrl, { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!ragRes.ok) {
+      const errText = await ragRes.text();
+      return res.status(ragRes.status).json({ error: errText });
+    }
+    const data = await ragRes.json();
+    res.json(data);
+  } catch (error) {
+    console.error('RAG daily synthesis proxy error:', error.message);
+    res.status(500).json({ error: `每日合成分析失敗: ${error.message}` });
+  }
+});
+
 // ─── RAG Stats Proxy ────────────────────────────────────────
 app.get('/api/rag/stats', async (req, res) => {
   try {

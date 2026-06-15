@@ -65,7 +65,7 @@ function switchPage(page) {
         loadFilesList();
     }
     if (page === 'rag') {
-        loadRagExplore();
+        loadDailySynthesis();
     }
 
     if (page === 'system') {
@@ -1174,36 +1174,35 @@ function handleLockScreenTouchEnd(e) {
 }
 
 
-// ─── Knowledge Base Explore (Wikipedia-style) ─────────
-let exploreDataCache = null;
+// ─── Daily Synthesis Summary ──────────────────────────
+let synthesisDataCache = null;
 
-async function loadRagExplore() {
-    const topicsList = document.getElementById('exploreTopicsList');
-    const exploreHero = document.getElementById('exploreHero');
-    const relatedCard = document.getElementById('exploreRelatedCard');
-    const recentCard = document.getElementById('exploreRecentCard');
+async function loadDailySynthesis(force = false) {
+    const loading = document.getElementById('synthesisLoading');
+    const error = document.getElementById('synthesisError');
+    const grid = document.getElementById('synthesisGrid');
+    const dateBadge = document.getElementById('synthesisDateBadge');
+    const cachedBadge = document.getElementById('synthesisCachedBadge');
+    const notesCount = document.getElementById('synthesisNotesCount');
     
-    // Reset topics list to loading state
-    topicsList.innerHTML = `
-        <div style="color:var(--text-muted); font-size:13px; font-style:italic; display:flex; align-items:center; gap:8px;">
-            <span class="spinner" style="width:14px;height:14px;border-width:2px;border-top-color:#a78bfa;"></span>
-            正在取得隨機主題...
-        </div>
-    `;
-    
-    // Hide details area initially
-    exploreHero.style.display = 'none';
-    relatedCard.style.display = 'none';
-    recentCard.style.display = 'none';
+    // Show loading, hide others
+    loading.style.display = 'flex';
+    error.style.display = 'none';
+    grid.style.display = 'none';
+    cachedBadge.style.display = 'none';
+    notesCount.textContent = '';
+    dateBadge.textContent = '📅 載入中...';
     
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 40000); // 40s timeout
-        const res = await fetch(`${API}/api/rag/explore`, { signal: controller.signal });
+        const timeoutId = setTimeout(() => controller.abort(), 75000); // 75s timeout
+        const url = `${API}/api/rag/daily-synthesis${force ? '?force=true' : ''}`;
+        const res = await fetch(url, { signal: controller.signal });
         clearTimeout(timeoutId);
+        
         if (!res.ok) {
             const errText = await res.text();
-            let errorText = '探索 API 無法連線';
+            let errorText = '合成分析 API 無法連線';
             try {
                 const errJson = JSON.parse(errText);
                 errorText = errJson.error || errJson.detail || errText;
@@ -1212,14 +1211,15 @@ async function loadRagExplore() {
             }
             throw new Error(errorText);
         }
-        const data = await res.json();
         
-        // 渲染統計數據 (即使未選擇主題也要展示)
+        const data = await res.json();
+        synthesisDataCache = data;
+        
+        // Update stats
         if (data.stats) {
-            let total = 0;
             const hedgedocCount = data.stats['hedgedoc_notes'] || 0;
             const obsidianCount = data.stats['obsidian_notes'] || 0;
-            total = hedgedocCount + obsidianCount;
+            const total = hedgedocCount + obsidianCount;
             
             const totalEl = document.getElementById('statTotalValue');
             const hedgedocEl = document.getElementById('statHedgedocValue');
@@ -1228,231 +1228,216 @@ async function loadRagExplore() {
             if (totalEl) totalEl.textContent = total.toLocaleString();
             if (hedgedocEl) hedgedocEl.textContent = hedgedocCount.toLocaleString();
             if (obsidianEl) obsidianEl.textContent = obsidianCount.toLocaleString();
+            
+            [totalEl, hedgedocEl, obsidianEl].forEach(el => {
+                if (el) {
+                    el.classList.remove('animate');
+                    void el.offsetWidth;
+                    el.classList.add('animate');
+                }
+            });
         }
         
-        if (!data.keywords || data.keywords.length === 0) {
-            topicsList.innerHTML = `<div style="color:var(--text-muted); font-size:13px; font-style:italic;">知識庫中尚無任何資料</div>`;
+        // Update date badge
+        if (data.date) {
+            dateBadge.textContent = `📅 ${data.date}`;
+        }
+        
+        // Show cached badge
+        if (data.cached) {
+            cachedBadge.style.display = 'inline-flex';
+        }
+        
+        // Show notes count
+        if (data.notes_analyzed) {
+            notesCount.textContent = `分析了 ${data.notes_analyzed} 篇筆記`;
+        }
+        
+        // Check for errors
+        if (data.error) {
+            loading.style.display = 'none';
+            error.style.display = 'flex';
+            document.getElementById('synthesisErrorText').textContent = data.error;
             return;
         }
         
-        // 渲染 5 個隨機主題按鈕
-        topicsList.innerHTML = '';
-        data.keywords.forEach(kw => {
-            const btn = document.createElement('button');
-            btn.className = 'topic-pill';
-            btn.innerHTML = `# <span>${escapeHtml(kw)}</span>`;
-            btn.onclick = () => loadRagExploreDetail(kw, btn);
-            topicsList.appendChild(btn);
-        });
+        if (!data.synthesis) {
+            loading.style.display = 'none';
+            error.style.display = 'flex';
+            document.getElementById('synthesisErrorText').textContent = '未能生成合成分析結果';
+            return;
+        }
+        
+        // Check for raw_text fallback
+        if (data.synthesis.raw_text) {
+            loading.style.display = 'none';
+            grid.style.display = 'none';
+            error.style.display = 'flex';
+            document.getElementById('synthesisErrorText').innerHTML = `
+                <div style="font-size:13px; text-align:left; max-height:300px; overflow-y:auto; padding:12px; background:rgba(0,0,0,0.1); border-radius:8px; white-space:pre-wrap;">${escapeHtml(data.synthesis.raw_text)}</div>
+            `;
+            return;
+        }
+        
+        // Render the four cards
+        renderSynthesisCards(data.synthesis);
+        
+        loading.style.display = 'none';
+        grid.style.display = 'grid';
         
     } catch (e) {
-        console.error('Explore load keywords error:', e);
+        console.error('Daily synthesis error:', e);
+        loading.style.display = 'none';
+        error.style.display = 'flex';
         const isTimeout = e.name === 'AbortError';
-        topicsList.innerHTML = `
-            <div style="color:#ef4444; font-size:13px; display:flex; align-items:center; gap:8px;">
-                ❌ ${isTimeout ? '取得主題逾時，請確認 RAG API 已啟動' : e.message}
+        document.getElementById('synthesisErrorText').textContent = isTimeout
+            ? '分析逾時，請確認 RAG API 已啟動並重試'
+            : e.message;
+    }
+}
+
+function renderSynthesisCards(synthesis) {
+    const grid = document.getElementById('synthesisGrid');
+    let html = '';
+    
+    // ── 1. Connections ──
+    const conn = synthesis.connections;
+    if (conn) {
+        const noteAClass = (conn.note_a_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
+        const noteBClass = (conn.note_b_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
+        const noteAIcon = noteAClass === 'hedgedoc' ? '📝' : '📓';
+        const noteBIcon = noteBClass === 'hedgedoc' ? '📝' : '📓';
+        html += `
+            <div class="synthesis-card">
+                <div class="synthesis-card-accent connections"></div>
+                <div class="synthesis-card-inner">
+                    <div class="synthesis-card-title">
+                        <div class="synthesis-card-icon connections">🔗</div>
+                        <div>
+                            <h5>連結 Connections</h5>
+                            <div class="synthesis-card-subtitle">兩份獨立筆記間的非顯而易見關聯</div>
+                        </div>
+                    </div>
+                    <div class="synthesis-note-tags">
+                        <span class="synthesis-note-tag ${noteAClass}" title="${escapeHtml(conn.note_a_title || '')}">${noteAIcon} ${escapeHtml(conn.note_a_title || '筆記 A')}</span>
+                        <span style="color:var(--text-muted); font-size:12px;">↔</span>
+                        <span class="synthesis-note-tag ${noteBClass}" title="${escapeHtml(conn.note_b_title || '')}">${noteBIcon} ${escapeHtml(conn.note_b_title || '筆記 B')}</span>
+                    </div>
+                    <div class="synthesis-insight">${escapeHtml(conn.insight || '')}</div>
+                    ${conn.reasoning ? `<div class="synthesis-reasoning">${escapeHtml(conn.reasoning)}</div>` : ''}
+                </div>
             </div>
         `;
     }
-}
-
-async function loadRagExploreDetail(keyword, clickedBtnElement) {
-    const exploreHero = document.getElementById('exploreHero');
-    const loading = document.getElementById('exploreHeroLoading');
-    const content = document.getElementById('exploreHeroContent');
-    const empty = document.getElementById('exploreHeroEmpty');
-    const relatedCard = document.getElementById('exploreRelatedCard');
-    const recentCard = document.getElementById('exploreRecentCard');
     
-    // Highlight the clicked pill
-    const pills = document.querySelectorAll('#exploreTopicsList .topic-pill');
-    pills.forEach(p => p.classList.remove('active'));
-    if (clickedBtnElement) {
-        clickedBtnElement.classList.add('active');
-    }
-    
-    // Show exploreHero & loading state
-    exploreHero.style.display = 'block';
-    loading.style.display = 'flex';
-    content.style.display = 'none';
-    empty.style.display = 'none';
-    relatedCard.style.display = 'none';
-    recentCard.style.display = 'none';
-    
-    try {
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 40000); // 40s timeout
-        const res = await fetch(`${API}/api/rag/explore?keyword=${encodeURIComponent(keyword)}`, { signal: controller.signal });
-        clearTimeout(timeoutId);
-        if (!res.ok) {
-            const errText = await res.text();
-            let errorText = '探索 API 無法連線';
-            try {
-                const errJson = JSON.parse(errText);
-                errorText = errJson.error || errJson.detail || errText;
-            } catch (jsErr) {
-                errorText = errText || errorText;
-            }
-            throw new Error(errorText);
-        }
-        const data = await res.json();
-        
-        exploreDataCache = data;
-        
-        if (!data.keyword || !data.keyword_doc) {
-            loading.style.display = 'none';
-            empty.style.display = 'block';
-            empty.querySelector('h3').textContent = '無相關資料';
-            empty.querySelector('p').textContent = `找不到與「${keyword}」相關的文獻內容。`;
-            return;
-        }
-        
-        renderExploreSection(data);
-        
-    } catch (e) {
-        console.error('Explore detail error:', e);
-        loading.style.display = 'none';
-        empty.style.display = 'block';
-        const isTimeout = e.name === 'AbortError';
-        empty.querySelector('h3').textContent = isTimeout ? '連線逾時' : '讀取焦點失敗';
-        empty.querySelector('p').textContent = isTimeout
-            ? 'RAG API 處理此主題回應太慢，請重試或更換主題。'
-            : `錯誤: ${e.message}`;
-    }
-}
-
-function renderExploreSection(data) {
-    const loading = document.getElementById('exploreHeroLoading');
-    const content = document.getElementById('exploreHeroContent');
-    const empty = document.getElementById('exploreHeroEmpty');
-    
-    loading.style.display = 'none';
-    content.style.display = 'block';
-    empty.style.display = 'none';
-    
-    // ── Stats ──
-    if (data.stats) {
-        let total = 0;
-        const hedgedocCount = data.stats['hedgedoc_notes'] || 0;
-        const obsidianCount = data.stats['obsidian_notes'] || 0;
-        total = hedgedocCount + obsidianCount;
-        
-        const totalEl = document.getElementById('statTotalValue');
-        const hedgedocEl = document.getElementById('statHedgedocValue');
-        const obsidianEl = document.getElementById('statObsidianValue');
-        
-        totalEl.textContent = total.toLocaleString();
-        hedgedocEl.textContent = hedgedocCount.toLocaleString();
-        obsidianEl.textContent = obsidianCount.toLocaleString();
-        
-        // Animate
-        [totalEl, hedgedocEl, obsidianEl].forEach(el => {
-            el.classList.remove('animate');
-            void el.offsetWidth; // force reflow
-            el.classList.add('animate');
-        });
-    }
-    
-    // ── Keyword Spotlight ──
-    document.getElementById('exploreKeyword').textContent = data.keyword;
-    
-    const doc = data.keyword_doc;
-    if (doc) {
-        const collClass = doc.collection === 'hedgedoc_notes' ? 'coll-badge-hedgedoc' : 'coll-badge-obsidian';
-        const collIcon = doc.collection === 'hedgedoc_notes' ? '📝' : '📓';
-        
-        document.getElementById('exploreKeywordMeta').innerHTML = `
-            <span class="coll-badge ${collClass}">${collIcon} ${escapeHtml(doc.collection)}</span>
-            <span style="font-size:12px; color:var(--text-muted);">📏 ${doc.text_length?.toLocaleString() || '?'} 字</span>
-            ${doc.source_path ? `<span style="font-size:12px; color:var(--text-muted);">📂 ${escapeHtml(doc.source_path.split('/').pop())}</span>` : ''}
-        `;
-        
-        document.getElementById('exploreKeywordSnippet').textContent = doc.snippet || '';
-        
-        let footerHtml = '';
-        if (doc.url && doc.url.startsWith('http')) {
-            footerHtml += `<a href="${escapeHtml(doc.url)}" target="_blank" class="keyword-tag" style="text-decoration:none;">🔗 開啟原文</a>`;
-        }
-        document.getElementById('exploreKeywordFooter').innerHTML = footerHtml;
-    }
-    
-    // ── Related Content ──
-    const relatedCard = document.getElementById('exploreRelatedCard');
-    const relatedList = document.getElementById('exploreRelatedList');
-    
-    if (data.related_docs && data.related_docs.length > 0) {
-        relatedCard.style.display = 'block';
-        document.getElementById('exploreRelatedSubtitle').textContent = `與「${data.keyword}」最相關的內容`;
-        
-        relatedList.innerHTML = data.related_docs.map((doc, i) => {
-            const collClass = doc.collection === 'hedgedoc_notes' ? 'coll-badge-hedgedoc' : 'coll-badge-obsidian';
-            const collIcon = doc.collection === 'hedgedoc_notes' ? '📝' : '📓';
-            const linkAttr = doc.url && doc.url.startsWith('http') 
-                ? `onclick="window.open('${escapeHtml(doc.url)}', '_blank')"` 
-                : `onclick="useKeywordAsQuery('${escapeHtml(doc.title).replace(/'/g, "\\'")}')"`;
-            
-            return `
-                <div class="related-item" ${linkAttr}>
-                    <div class="related-item-rank">${i + 1}</div>
-                    <div class="related-item-body">
-                        <div class="related-item-title">
-                            ${escapeHtml(doc.title)}
-                            <span class="coll-badge ${collClass}">${collIcon} ${escapeHtml(doc.collection)}</span>
-                            <span class="related-item-score">🎯 ${doc.score}</span>
+    // ── 2. Pattern ──
+    const pat = synthesis.pattern;
+    if (pat) {
+        const noteTags = (pat.note_titles || []).map(t => {
+            return `<span class="synthesis-note-tag">${escapeHtml(t)}</span>`;
+        }).join('');
+        html += `
+            <div class="synthesis-card">
+                <div class="synthesis-card-accent pattern"></div>
+                <div class="synthesis-card-inner">
+                    <div class="synthesis-card-title">
+                        <div class="synthesis-card-icon pattern">🔄</div>
+                        <div>
+                            <h5>模式 Pattern</h5>
+                            <div class="synthesis-card-subtitle">跨越三份以上筆記的共同主題</div>
                         </div>
-                        <div class="related-item-snippet">${escapeHtml(doc.snippet)}</div>
                     </div>
+                    <div style="font-size:15px; font-weight:700; color:var(--text-primary); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+                        <span style="color:#3b82f6;">◆</span> ${escapeHtml(pat.theme || '未知主題')}
+                    </div>
+                    <div class="synthesis-note-tags">${noteTags}</div>
+                    <div class="synthesis-insight">${escapeHtml(pat.summary || '')}</div>
                 </div>
-            `;
-        }).join('');
-    } else {
-        relatedCard.style.display = 'none';
+            </div>
+        `;
     }
     
-    // ── Recent Entries ──
-    const recentCard = document.getElementById('exploreRecentCard');
-    const recentScroll = document.getElementById('exploreRecentScroll');
-    
-    if (data.recent_docs && data.recent_docs.length > 0) {
-        recentCard.style.display = 'block';
-        
-        recentScroll.innerHTML = data.recent_docs.map(doc => {
-            const collClass = doc.collection === 'hedgedoc_notes' ? 'coll-badge-hedgedoc' : 'coll-badge-obsidian';
-            const collIcon = doc.collection === 'hedgedoc_notes' ? '📝' : '📓';
-            const clickAction = doc.url && doc.url.startsWith('http')
-                ? `onclick="window.open('${escapeHtml(doc.url)}', '_blank')"`
-                : `onclick="useKeywordAsQuery('${escapeHtml(doc.title).replace(/'/g, "\\'")}')"`;
-            
-            return `
-                <div class="recent-card" ${clickAction}>
-                    <div class="recent-card-title" title="${escapeHtml(doc.title)}">${escapeHtml(doc.title)}</div>
-                    <div class="recent-card-snippet">${escapeHtml(doc.snippet)}</div>
-                    <div class="recent-card-footer">
-                        <span class="coll-badge ${collClass}">${collIcon} ${escapeHtml(doc.collection)}</span>
+    // ── 3. Contradiction ──
+    const contra = synthesis.contradiction;
+    if (contra) {
+        const contraAClass = (contra.note_a_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
+        const contraBClass = (contra.note_b_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
+        const contraAIcon = contraAClass === 'hedgedoc' ? '📝' : '📓';
+        const contraBIcon = contraBClass === 'hedgedoc' ? '📝' : '📓';
+        html += `
+            <div class="synthesis-card">
+                <div class="synthesis-card-accent contradiction"></div>
+                <div class="synthesis-card-inner">
+                    <div class="synthesis-card-title">
+                        <div class="synthesis-card-icon contradiction">⚡</div>
+                        <div>
+                            <h5>矛盾 Contradiction</h5>
+                            <div class="synthesis-card-subtitle">不同筆記中相互衝突的立場</div>
+                        </div>
                     </div>
+                    <div class="synthesis-vs">
+                        <div style="flex:1;">
+                            <div class="synthesis-note-tags" style="margin-bottom:6px;">
+                                <span class="synthesis-note-tag ${contraAClass}">${contraAIcon} ${escapeHtml(contra.note_a_title || '筆記 A')}</span>
+                            </div>
+                            <div class="synthesis-stance">${escapeHtml(contra.note_a_stance || '')}</div>
+                        </div>
+                        <div class="synthesis-vs-divider">VS</div>
+                        <div style="flex:1;">
+                            <div class="synthesis-note-tags" style="margin-bottom:6px;">
+                                <span class="synthesis-note-tag ${contraBClass}">${contraBIcon} ${escapeHtml(contra.note_b_title || '筆記 B')}</span>
+                            </div>
+                            <div class="synthesis-stance">${escapeHtml(contra.note_b_stance || '')}</div>
+                        </div>
+                    </div>
+                    <div class="synthesis-insight" style="margin-top:10px;">${escapeHtml(contra.conflict || '')}</div>
                 </div>
-            `;
-        }).join('');
-    } else {
-        recentCard.style.display = 'none';
+            </div>
+        `;
     }
+    
+    // ── 4. Best Capture ──
+    const best = synthesis.best_capture;
+    if (best) {
+        const bestClass = (best.note_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
+        const bestIcon = bestClass === 'hedgedoc' ? '📝' : '📓';
+        const directions = (best.development_directions || []).map(d => {
+            return `<span class="synthesis-direction-tag">→ ${escapeHtml(d)}</span>`;
+        }).join('');
+        html += `
+            <div class="synthesis-card">
+                <div class="synthesis-card-accent best-capture"></div>
+                <div class="synthesis-card-inner">
+                    <div class="synthesis-card-title">
+                        <div class="synthesis-card-icon best-capture">⭐</div>
+                        <div>
+                            <h5>最佳捕捉 Best Capture</h5>
+                            <div class="synthesis-card-subtitle">最值得深入發展的筆記</div>
+                        </div>
+                    </div>
+                    <div class="synthesis-note-tags">
+                        <span class="synthesis-note-tag ${bestClass}">${bestIcon} ${escapeHtml(best.note_title || '未知筆記')}</span>
+                    </div>
+                    <div class="synthesis-insight">${escapeHtml(best.reason || '')}</div>
+                    ${directions ? `<div class="synthesis-directions">${directions}</div>` : ''}
+                </div>
+            </div>
+        `;
+    }
+    
+    grid.innerHTML = html;
 }
 
 function useKeywordAsQuery(keyword) {
     const queryInput = document.getElementById('ragQuery');
     if (keyword) {
         queryInput.value = keyword;
-    } else if (exploreDataCache && exploreDataCache.keyword) {
-        queryInput.value = exploreDataCache.keyword;
     }
     queryInput.focus();
     queryInput.scrollIntoView({ behavior: 'smooth', block: 'center' });
     showToast('已填入關鍵詞，按下查詢即可搜尋', 'info');
 }
 
-function refreshRandomKeyword() {
-    loadRagExplore();
-}
 
 // ─── Local RAG Query ──────────────────────────────────
 async function askRag() {

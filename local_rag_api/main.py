@@ -490,6 +490,277 @@ async def explore_knowledge_base(
         raise HTTPException(status_code=500, detail=f"探索知識庫時發生錯誤: {str(e)}")
 
 
+SYNTHESIS_CACHE_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'daily_synthesis_cache.json'))
+
+def load_synthesis_cache():
+    try:
+        if os.path.exists(SYNTHESIS_CACHE_FILE):
+            with open(SYNTHESIS_CACHE_FILE, 'r', encoding='utf-8') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def save_synthesis_cache(data):
+    os.makedirs(os.path.dirname(SYNTHESIS_CACHE_FILE), exist_ok=True)
+    with open(SYNTHESIS_CACHE_FILE, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+@app.get("/daily-synthesis")
+async def daily_synthesis(
+    collections: str = Query(default="hedgedoc_notes,obsidian_notes", description="逗號分隔的 collection 名稱"),
+    force: bool = Query(default=False, description="強制重新生成（忽略快取）"),
+    gemini_api_key: Optional[str] = Query(default=None, description="Gemini API 金鑰"),
+    gemini_model: Optional[str] = Query(default=None, description="Gemini 模型名稱")
+):
+    """每日合成摘要 — 分析知識庫筆記，產出連結、模式、矛盾、最佳捕捉四大區塊"""
+    import time
+    from datetime import datetime, date
+    
+    target_collections = [c.strip() for c in collections.split(",") if c.strip()]
+    today_str = date.today().isoformat()
+    
+    # 主動從 settings.json 載入 Gemini API 設定 (如果參數未提供)
+    if not gemini_api_key or not gemini_model:
+        try:
+            settings_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'settings.json'))
+            if os.path.exists(settings_path):
+                with open(settings_path, 'r', encoding='utf-8') as f:
+                    settings_data = json.load(f)
+                    if not gemini_api_key:
+                        gemini_api_key = settings_data.get("geminiApiKey", "")
+                    if not gemini_model:
+                        gemini_model = settings_data.get("geminiModel", "gemini-2.5-flash")
+        except Exception as e_settings:
+            log_api_step(f"Error loading settings in daily-synthesis: {e_settings}")
+    
+    # 快取檢查：同日直接回傳
+    if not force:
+        cache = load_synthesis_cache()
+        if cache.get("date") == today_str and cache.get("synthesis"):
+            log_api_step(f"Daily synthesis cache hit for {today_str}")
+            # 取得最新 stats
+            stats = {}
+            for coll in target_collections:
+                if qdrant.collection_exists(collection_name=coll):
+                    info = qdrant.get_collection(collection_name=coll)
+                    stats[coll] = info.points_count
+                else:
+                    stats[coll] = 0
+            cache["stats"] = stats
+            cache["cached"] = True
+            return cache
+    
+    try:
+        t0 = time.time()
+        log_api_step(f"===> Daily synthesis started: collections={target_collections}, force={force}")
+        
+        # 1. 取得各 collection 的統計資訊
+        stats = {}
+        valid_collections = []
+        for coll in target_collections:
+            if not qdrant.collection_exists(collection_name=coll):
+                continue
+            info = qdrant.get_collection(collection_name=coll)
+            count = info.points_count
+            stats[coll] = count
+            if count > 0:
+                valid_collections.append((coll, count))
+        
+        t1 = time.time()
+        log_api_step(f"Daily synthesis stats loaded in {t1-t0:.2f}s: {stats}")
+        
+        # 2. 從各 collection 隨機取得筆記
+        all_notes = []
+        for coll in target_collections:
+            if not qdrant.collection_exists(collection_name=coll):
+                continue
+            scroll_res = qdrant.scroll(
+                collection_name=coll,
+                limit=50,
+                with_payload=True,
+                with_vectors=False
+            )
+            for point in scroll_res[0]:
+                title, url, source_path = extract_metadata_from_payload(point.payload, coll)
+                text = extract_text_from_payload(point.payload)
+                if title and text and len(text.strip()) > 50:
+                    all_notes.append({
+                        "title": title.strip(),
+                        "text": text.strip(),
+                        "collection": coll,
+                        "url": url,
+                        "source_path": source_path
+                    })
+        
+        random.shuffle(all_notes)
+        selected_notes = all_notes[:15]
+        
+        t2 = time.time()
+        log_api_step(f"Daily synthesis collected {len(selected_notes)} notes in {t2-t1:.2f}s")
+        
+        if len(selected_notes) < 3:
+            return {
+                "date": today_str,
+                "synthesis": None,
+                "stats": stats,
+                "notes_analyzed": len(selected_notes),
+                "cached": False,
+                "error": "知識庫中筆記數量不足（至少需要 3 篇），無法進行合成分析"
+            }
+        
+        # 3. 構建 LLM Prompt
+        notes_context = ""
+        for idx, note in enumerate(selected_notes):
+            snippet = note["text"][:300].replace("\n", " ")
+            notes_context += f"\n筆記 {idx+1}: 標題:「{note['title']}」, 來源: {note['collection']}, 內容節錄:「{snippet}...」\n"
+        
+        synthesis_prompt = f"""你是一位具備深度分析能力的知識庫研究員。以下是從個人知識庫中隨機抽取的 {len(selected_notes)} 篇筆記。
+
+請針對這些筆記進行「每日合成分析」，嚴格依照以下 JSON 格式輸出四個分析區塊。
+
+## 分析要求：
+
+1. **連結 (Connections)**：找出兩份「表面上無關」的筆記之間的非顯而易見關聯。不要選擇主題相近的筆記，要找出跨領域、跨主題的深層連結。
+2. **模式 (Pattern)**：總結跨越至少三份筆記的共同主題或趨勢。這個模式應該是筆記作者可能沒有意識到的潛在趨勢。
+3. **矛盾 (Contradiction)**：標示出不同筆記中在某個議題上相互衝突或矛盾的立場。如果沒有直接矛盾，可以指出潛在的張力或不一致之處。
+4. **最佳捕捉 (Best Capture)**：推薦單一最值得深入發展的筆記，並說明為什麼這篇最值得擴展，以及可能的發展方向。
+
+## 筆記內容：
+{notes_context}
+
+## 輸出格式（嚴格 JSON）：
+
+請直接輸出以下 JSON，不要加任何 markdown 代碼區塊標記或多餘文字：
+
+{{
+  "connections": {{
+    "note_a_title": "筆記A的標題",
+    "note_a_collection": "筆記A的來源集合",
+    "note_b_title": "筆記B的標題",
+    "note_b_collection": "筆記B的來源集合",
+    "insight": "這兩篇筆記之間的非顯而易見關聯（2-3 句）",
+    "reasoning": "你的推理過程簡述"
+  }},
+  "pattern": {{
+    "theme": "共同主題名稱（簡短）",
+    "note_titles": ["涉及的筆記標題1", "筆記標題2", "筆記標題3"],
+    "summary": "這些筆記共同反映出的趨勢或模式（2-3 句）"
+  }},
+  "contradiction": {{
+    "note_a_title": "筆記A的標題",
+    "note_a_collection": "筆記A的來源集合",
+    "note_a_stance": "筆記A的立場簡述",
+    "note_b_title": "筆記B的標題",
+    "note_b_collection": "筆記B的來源集合",
+    "note_b_stance": "筆記B的立場簡述",
+    "conflict": "這兩篇筆記在哪個議題上存在衝突或張力（1-2 句）"
+  }},
+  "best_capture": {{
+    "note_title": "推薦筆記的標題",
+    "note_collection": "推薦筆記的來源集合",
+    "reason": "為什麼這篇最值得深入發展（2-3 句）",
+    "development_directions": ["發展方向1", "發展方向2", "發展方向3"]
+  }}
+}}"""
+
+        # 4. 呼叫 LLM
+        synthesis_result = None
+        method_used = "none"
+        raw_response = ""
+        
+        # 4a. 優先嘗試 Gemini API
+        if gemini_api_key:
+            try:
+                g_model = gemini_model or "gemini-2.5-flash"
+                log_api_step(f"Daily synthesis: calling Gemini API ({g_model})")
+                
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{g_model}:generateContent?key={gemini_api_key}"
+                payload = {
+                    "contents": [{"parts": [{"text": synthesis_prompt}]}],
+                    "generationConfig": {"temperature": 0.7, "maxOutputTokens": 4096}
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(payload).encode('utf-8'),
+                    headers={'Content-Type': 'application/json'},
+                    method='POST'
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    resp_data = json.loads(resp.read().decode('utf-8'))
+                    raw_response = resp_data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '').strip()
+                
+                log_api_step(f"Gemini daily synthesis raw response length: {len(raw_response)}")
+                method_used = "gemini"
+            except Exception as e_gemini:
+                log_api_step(f"Gemini daily synthesis failed: {e_gemini}")
+        
+        # 4b. 降級使用 Ollama
+        if not raw_response:
+            try:
+                log_api_step("Daily synthesis: falling back to Ollama")
+                response = ollama_client.chat(model="gemma3:270m", messages=[
+                    {'role': 'user', 'content': synthesis_prompt}
+                ])
+                raw_response = response['message']['content'].strip()
+                log_api_step(f"Ollama daily synthesis raw response length: {len(raw_response)}")
+                method_used = "ollama"
+            except Exception as e_ollama:
+                log_api_step(f"Ollama daily synthesis failed: {e_ollama}")
+        
+        # 5. 解析 JSON 回應
+        if raw_response:
+            try:
+                # 清理可能的 markdown 代碼區塊標記
+                cleaned = raw_response.strip()
+                if cleaned.startswith("```"):
+                    # 去掉 ```json 和 ```
+                    cleaned = re.sub(r'^```(?:json)?\s*\n?', '', cleaned)
+                    cleaned = re.sub(r'\n?```\s*$', '', cleaned)
+                synthesis_result = json.loads(cleaned)
+                log_api_step(f"Daily synthesis JSON parsed successfully")
+            except json.JSONDecodeError as e_json:
+                log_api_step(f"Daily synthesis JSON parse failed: {e_json}, raw: {raw_response[:200]}")
+                # 嘗試找到第一個 { 和最後一個 }
+                first_brace = raw_response.find('{')
+                last_brace = raw_response.rfind('}')
+                if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                    try:
+                        synthesis_result = json.loads(raw_response[first_brace:last_brace+1])
+                        log_api_step("Daily synthesis JSON parsed on second attempt (brace extraction)")
+                    except json.JSONDecodeError:
+                        synthesis_result = {"raw_text": raw_response}
+                        log_api_step("Daily synthesis falling back to raw text")
+                else:
+                    synthesis_result = {"raw_text": raw_response}
+        
+        t3 = time.time()
+        log_api_step(f"Daily synthesis completed in {t3-t0:.2f}s using {method_used}")
+        
+        result = {
+            "date": today_str,
+            "synthesis": synthesis_result,
+            "stats": stats,
+            "notes_analyzed": len(selected_notes),
+            "cached": False,
+            "method": method_used,
+            "selected_notes": [{"title": n["title"], "collection": n["collection"]} for n in selected_notes]
+        }
+        
+        # 6. 快取結果
+        if synthesis_result and "raw_text" not in synthesis_result:
+            save_synthesis_cache(result)
+            log_api_step(f"Daily synthesis cached for {today_str}")
+        
+        return result
+        
+    except Exception as e:
+        msg_err = f"Daily synthesis error: {e}"
+        print(msg_err, flush=True)
+        log_api_step(msg_err)
+        raise HTTPException(status_code=500, detail=f"每日合成分析時發生錯誤: {str(e)}")
+
+
 @app.get("/stats")
 async def get_stats(
     collections: str = Query(default="hedgedoc_notes,obsidian_notes")
