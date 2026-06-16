@@ -1296,6 +1296,60 @@ async function loadDailySynthesis(force = false) {
     }
 }
 
+// Helper to find note links from selected_notes
+function findNoteLink(title, collection) {
+    if (!synthesisDataCache || !synthesisDataCache.selected_notes) return null;
+    
+    const notes = synthesisDataCache.selected_notes;
+    const cleanTitle = (title || '').trim().toLowerCase();
+    
+    // 1. Exact match on title and collection (if collection provided)
+    let found = notes.find(n => {
+        const tMatch = (n.title || '').trim().toLowerCase() === cleanTitle;
+        const cMatch = collection ? ((n.collection || '').toLowerCase() === collection.toLowerCase()) : true;
+        return tMatch && cMatch;
+    });
+    
+    // 2. Fuzzy/partial match fallback
+    if (!found) {
+        found = notes.find(n => {
+            const nTitle = (n.title || '').trim().toLowerCase();
+            return nTitle.includes(cleanTitle) || cleanTitle.includes(nTitle);
+        });
+    }
+    
+    if (found) {
+        const coll = found.collection || collection;
+        if (coll && coll.includes('hedgedoc') && found.url) {
+            return { type: 'hedgedoc', url: found.url };
+        } else if (coll && coll.includes('obsidian') && found.source_path) {
+            if (found.url && found.url.startsWith('obsidian://')) {
+                return { type: 'obsidian', url: found.url };
+            }
+            const obsidianUri = `obsidian://open?path=${encodeURIComponent(found.source_path)}`;
+            return { type: 'obsidian', url: obsidianUri };
+        }
+    }
+    return null;
+}
+
+// Helper to generate the note tag HTML (either as link or span)
+function generateNoteTagHtml(title, collection) {
+    const isHedgedoc = (collection || '').toLowerCase().includes('hedgedoc') || 
+                       (synthesisDataCache && synthesisDataCache.selected_notes && 
+                        synthesisDataCache.selected_notes.some(n => (n.title || '').trim().toLowerCase() === (title || '').trim().toLowerCase() && (n.collection || '').includes('hedgedoc')));
+    
+    const noteClass = isHedgedoc ? 'hedgedoc' : 'obsidian';
+    const icon = isHedgedoc ? '📝' : '📓';
+    const link = findNoteLink(title, collection);
+    
+    if (link && link.url) {
+        return `<a href="${link.url}" target="_blank" class="synthesis-note-tag ${noteClass}" title="${escapeHtml(title || '')}">${icon} ${escapeHtml(title || '')}</a>`;
+    } else {
+        return `<span class="synthesis-note-tag ${noteClass}" title="${escapeHtml(title || '')}">${icon} ${escapeHtml(title || '')}</span>`;
+    }
+}
+
 function renderSynthesisCards(synthesis) {
     const grid = document.getElementById('synthesisGrid');
     let html = '';
@@ -1303,10 +1357,8 @@ function renderSynthesisCards(synthesis) {
     // ── 1. Connections ──
     const conn = synthesis.connections;
     if (conn) {
-        const noteAClass = (conn.note_a_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
-        const noteBClass = (conn.note_b_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
-        const noteAIcon = noteAClass === 'hedgedoc' ? '📝' : '📓';
-        const noteBIcon = noteBClass === 'hedgedoc' ? '📝' : '📓';
+        const tagA = generateNoteTagHtml(conn.note_a_title, conn.note_a_collection);
+        const tagB = generateNoteTagHtml(conn.note_b_title, conn.note_b_collection);
         html += `
             <div class="synthesis-card">
                 <div class="synthesis-card-accent connections"></div>
@@ -1319,9 +1371,9 @@ function renderSynthesisCards(synthesis) {
                         </div>
                     </div>
                     <div class="synthesis-note-tags">
-                        <span class="synthesis-note-tag ${noteAClass}" title="${escapeHtml(conn.note_a_title || '')}">${noteAIcon} ${escapeHtml(conn.note_a_title || '筆記 A')}</span>
+                        ${tagA}
                         <span style="color:var(--text-muted); font-size:12px;">↔</span>
-                        <span class="synthesis-note-tag ${noteBClass}" title="${escapeHtml(conn.note_b_title || '')}">${noteBIcon} ${escapeHtml(conn.note_b_title || '筆記 B')}</span>
+                        ${tagB}
                     </div>
                     <div class="synthesis-insight">${escapeHtml(conn.insight || '')}</div>
                     ${conn.reasoning ? `<div class="synthesis-reasoning">${escapeHtml(conn.reasoning)}</div>` : ''}
@@ -1334,7 +1386,7 @@ function renderSynthesisCards(synthesis) {
     const pat = synthesis.pattern;
     if (pat) {
         const noteTags = (pat.note_titles || []).map(t => {
-            return `<span class="synthesis-note-tag">${escapeHtml(t)}</span>`;
+            return generateNoteTagHtml(t, null);
         }).join('');
         html += `
             <div class="synthesis-card">
@@ -1360,10 +1412,8 @@ function renderSynthesisCards(synthesis) {
     // ── 3. Contradiction ──
     const contra = synthesis.contradiction;
     if (contra) {
-        const contraAClass = (contra.note_a_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
-        const contraBClass = (contra.note_b_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
-        const contraAIcon = contraAClass === 'hedgedoc' ? '📝' : '📓';
-        const contraBIcon = contraBClass === 'hedgedoc' ? '📝' : '📓';
+        const tagA = generateNoteTagHtml(contra.note_a_title, contra.note_a_collection);
+        const tagB = generateNoteTagHtml(contra.note_b_title, contra.note_b_collection);
         html += `
             <div class="synthesis-card">
                 <div class="synthesis-card-accent contradiction"></div>
@@ -1378,14 +1428,14 @@ function renderSynthesisCards(synthesis) {
                     <div class="synthesis-vs">
                         <div style="flex:1;">
                             <div class="synthesis-note-tags" style="margin-bottom:6px;">
-                                <span class="synthesis-note-tag ${contraAClass}">${contraAIcon} ${escapeHtml(contra.note_a_title || '筆記 A')}</span>
+                                ${tagA}
                             </div>
                             <div class="synthesis-stance">${escapeHtml(contra.note_a_stance || '')}</div>
                         </div>
                         <div class="synthesis-vs-divider">VS</div>
                         <div style="flex:1;">
                             <div class="synthesis-note-tags" style="margin-bottom:6px;">
-                                <span class="synthesis-note-tag ${contraBClass}">${contraBIcon} ${escapeHtml(contra.note_b_title || '筆記 B')}</span>
+                                ${tagB}
                             </div>
                             <div class="synthesis-stance">${escapeHtml(contra.note_b_stance || '')}</div>
                         </div>
@@ -1399,10 +1449,11 @@ function renderSynthesisCards(synthesis) {
     // ── 4. Best Capture ──
     const best = synthesis.best_capture;
     if (best) {
-        const bestClass = (best.note_collection || '').includes('hedgedoc') ? 'hedgedoc' : 'obsidian';
-        const bestIcon = bestClass === 'hedgedoc' ? '📝' : '📓';
+        const tag = generateNoteTagHtml(best.note_title, best.note_collection);
         const directions = (best.development_directions || []).map(d => {
-            return `<span class="synthesis-direction-tag">→ ${escapeHtml(d)}</span>`;
+            const escapedD = escapeHtml(d);
+            const jsEscapedD = d.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+            return `<span class="synthesis-direction-tag" style="cursor: pointer;" onclick="useKeywordAsQuery('${jsEscapedD}')">→ ${escapedD}</span>`;
         }).join('');
         html += `
             <div class="synthesis-card">
@@ -1416,7 +1467,7 @@ function renderSynthesisCards(synthesis) {
                         </div>
                     </div>
                     <div class="synthesis-note-tags">
-                        <span class="synthesis-note-tag ${bestClass}">${bestIcon} ${escapeHtml(best.note_title || '未知筆記')}</span>
+                        ${tag}
                     </div>
                     <div class="synthesis-insight">${escapeHtml(best.reason || '')}</div>
                     ${directions ? `<div class="synthesis-directions">${directions}</div>` : ''}

@@ -2655,6 +2655,15 @@ textarea {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-decoration: none;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.synthesis-note-tag:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
+  filter: brightness(1.15);
 }
 
 .synthesis-note-tag.hedgedoc {
@@ -2735,6 +2744,14 @@ textarea {
   background: rgba(245, 158, 11, 0.1);
   color: #f59e0b;
   border: 1px solid rgba(245, 158, 11, 0.2);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.synthesis-direction-tag:hover {
+  background: rgba(245, 158, 11, 0.2);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-sm);
 }
 
 /* Synthesis Loading */

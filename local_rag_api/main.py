@@ -519,20 +519,20 @@ async def daily_synthesis(
     
     target_collections = [c.strip() for c in collections.split(",") if c.strip()]
     today_str = date.today().isoformat()
+    hedgedoc_base = ""
     
-    # 主動從 settings.json 載入 Gemini API 設定 (如果參數未提供)
-    if not gemini_api_key or not gemini_model:
-        try:
-            settings_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'settings.json'))
-            if os.path.exists(settings_path):
-                with open(settings_path, 'r', encoding='utf-8') as f:
-                    settings_data = json.load(f)
-                    if not gemini_api_key:
-                        gemini_api_key = settings_data.get("geminiApiKey", "")
-                    if not gemini_model:
-                        gemini_model = settings_data.get("geminiModel", "gemini-2.5-flash")
-        except Exception as e_settings:
-            log_api_step(f"Error loading settings in daily-synthesis: {e_settings}")
+    try:
+        settings_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'data', 'settings.json'))
+        if os.path.exists(settings_path):
+            with open(settings_path, 'r', encoding='utf-8') as f:
+                settings_data = json.load(f)
+                if not gemini_api_key:
+                    gemini_api_key = settings_data.get("geminiApiKey", "")
+                if not gemini_model:
+                    gemini_model = settings_data.get("geminiModel", "gemini-2.5-flash")
+                hedgedoc_base = settings_data.get("hedgedocUrl", "").rstrip('/')
+    except Exception as e_settings:
+        log_api_step(f"Error loading settings in daily-synthesis: {e_settings}")
     
     # 快取檢查：同日直接回傳
     if not force:
@@ -549,6 +549,43 @@ async def daily_synthesis(
                     stats[coll] = 0
             cache["stats"] = stats
             cache["cached"] = True
+            
+            # 確保 selected_notes 包含 url & source_path (補填邏輯以防舊快取無此資料)
+            if "selected_notes" in cache:
+                needs_enrich = any("url" not in n or "source_path" not in n for n in cache["selected_notes"])
+                if needs_enrich:
+                    log_api_step("Enriching cache selected_notes with urls and paths")
+                    # 建立標題對應的 URL/source_path 快取
+                    note_map = {}
+                    for coll in target_collections:
+                        if not qdrant.collection_exists(collection_name=coll):
+                            continue
+                        scroll_res = qdrant.scroll(collection_name=coll, limit=50, with_payload=True, with_vectors=False)
+                        for point in scroll_res[0]:
+                            title, url, source_path = extract_metadata_from_payload(point.payload, coll)
+                            if title:
+                                resolved_url = url
+                                if coll == "hedgedoc_notes" and hedgedoc_base:
+                                    if resolved_url and not resolved_url.startswith("http"):
+                                        resolved_url = f"{hedgedoc_base}/{resolved_url}"
+                                    elif not resolved_url:
+                                        doc_id = point.payload.get("id", point.payload.get("metadata", {}).get("id", ""))
+                                        if doc_id:
+                                            resolved_url = f"{hedgedoc_base}/{doc_id}"
+                                note_map[(title.strip(), coll)] = (resolved_url, source_path)
+                    
+                    # 補填 url 與 source_path
+                    for n in cache["selected_notes"]:
+                        title = n.get("title", "").strip()
+                        coll = n.get("collection", "")
+                        if (title, coll) in note_map:
+                            n["url"], n["source_path"] = note_map[(title, coll)]
+                        else:
+                            n.setdefault("url", "")
+                            n.setdefault("source_path", "")
+                    
+                    # 寫回快取檔案中
+                    save_synthesis_cache(cache)
             return cache
     
     try:
@@ -585,11 +622,21 @@ async def daily_synthesis(
                 title, url, source_path = extract_metadata_from_payload(point.payload, coll)
                 text = extract_text_from_payload(point.payload)
                 if title and text and len(text.strip()) > 50:
+                    # Resolve URL for hedgedoc notes if needed
+                    resolved_url = url
+                    if coll == "hedgedoc_notes" and hedgedoc_base:
+                        if resolved_url and not resolved_url.startswith("http"):
+                            resolved_url = f"{hedgedoc_base}/{resolved_url}"
+                        elif not resolved_url:
+                            doc_id = point.payload.get("id", point.payload.get("metadata", {}).get("id", ""))
+                            if doc_id:
+                                resolved_url = f"{hedgedoc_base}/{doc_id}"
+                    
                     all_notes.append({
                         "title": title.strip(),
                         "text": text.strip(),
                         "collection": coll,
-                        "url": url,
+                        "url": resolved_url,
                         "source_path": source_path
                     })
         
@@ -744,7 +791,7 @@ async def daily_synthesis(
             "notes_analyzed": len(selected_notes),
             "cached": False,
             "method": method_used,
-            "selected_notes": [{"title": n["title"], "collection": n["collection"]} for n in selected_notes]
+            "selected_notes": [{"title": n["title"], "collection": n["collection"], "url": n.get("url", ""), "source_path": n.get("source_path", "")} for n in selected_notes]
         }
         
         # 6. 快取結果
