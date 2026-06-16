@@ -2656,11 +2656,14 @@ textarea {
   text-overflow: ellipsis;
   white-space: nowrap;
   text-decoration: none;
+}
+
+a.synthesis-note-tag {
   cursor: pointer;
   transition: all var(--transition-fast);
 }
 
-.synthesis-note-tag:hover {
+a.synthesis-note-tag:hover {
   transform: translateY(-1px);
   box-shadow: var(--shadow-sm);
   filter: brightness(1.15);

@@ -1322,12 +1322,6 @@ function findNoteLink(title, collection) {
         const coll = found.collection || collection;
         if (coll && coll.includes('hedgedoc') && found.url) {
             return { type: 'hedgedoc', url: found.url };
-        } else if (coll && coll.includes('obsidian') && found.source_path) {
-            if (found.url && found.url.startsWith('obsidian://')) {
-                return { type: 'obsidian', url: found.url };
-            }
-            const obsidianUri = `obsidian://open?path=${encodeURIComponent(found.source_path)}`;
-            return { type: 'obsidian', url: obsidianUri };
         }
     }
     return null;
