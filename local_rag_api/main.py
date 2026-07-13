@@ -239,7 +239,25 @@ def extract_date_from_payload(payload):
         match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', path_str)
         if match:
             return match.group(0).replace('/', '-')
-            
+
+    # 5. 最後手段：從 page_content / text / content 的內文中掃描日期
+    #    (Obsidian YAML frontmatter 有時會被包含在 page_content 的開頭)
+    body_text = (
+        payload.get("page_content") or
+        payload.get("text") or
+        payload.get("content") or ""
+    )
+    if body_text:
+        body_str = str(body_text)[:2000]  # 只掃前 2000 字，避免過慢
+        # 掃出所有 YYYY-MM-DD 日期，取最新的
+        all_dates = re.findall(r'\d{4}[-/]\d{2}[-/]\d{2}', body_str)
+        if all_dates:
+            # 標準化並取最大值
+            norm = [d.replace('/', '-') for d in all_dates
+                    if '2000' <= d[:4] <= '2099']  # 合理年份範圍
+            if norm:
+                return max(norm)
+
     return None
 
 def get_latest_data_date(target_collections):
@@ -1200,6 +1218,51 @@ async def submit_feedback(request: FeedbackRequest):
     save_feedback(fb)
     print(f"==> 回饋更新: {"👍" if request.is_relevant else "👎"} score={request.score:.4f}, 新門檻={fb['score_threshold']:.3f}", flush=True)
     return {"success": True, "new_threshold": fb["score_threshold"], "stats": fb}
+
+@app.get("/debug-payload")
+async def debug_payload(
+    collections: str = Query(default="hedgedoc_notes,obsidian_notes"),
+    limit: int = Query(default=2, description="每個 collection 抓幾筆")
+):
+    """
+    除錯用 endpoint：列出各 collection 前幾筆的原始 payload 結構，
+    並顯示 extract_date_from_payload 的解析結果，方便確認日期欄位是否讀得到。
+    """
+    target_collections = [c.strip() for c in collections.split(",") if c.strip()]
+    result = {}
+    for coll in target_collections:
+        if not qdrant.collection_exists(collection_name=coll):
+            result[coll] = {"error": "collection not found"}
+            continue
+        scroll_res = qdrant.scroll(
+            collection_name=coll,
+            limit=limit,
+            with_payload=True,
+            with_vectors=False
+        )
+        points_info = []
+        for point in scroll_res[0]:
+            payload = point.payload or {}
+            parsed_date = extract_date_from_payload(payload)
+            # 列出所有 payload 的頂層鍵值（截短長字串）
+            payload_summary = {}
+            for k, v in payload.items():
+                if isinstance(v, str) and len(v) > 100:
+                    payload_summary[k] = v[:100] + "..."
+                elif isinstance(v, dict):
+                    payload_summary[k] = {kk: (str(vv)[:60] + "..." if isinstance(vv, str) and len(vv) > 60 else vv)
+                                          for kk, vv in v.items()}
+                else:
+                    payload_summary[k] = v
+            points_info.append({
+                "id": str(point.id),
+                "parsed_date": parsed_date,
+                "payload_keys": list(payload.keys()),
+                "payload_summary": payload_summary
+            })
+        result[coll] = points_info
+    return result
+
 
 if __name__ == "__main__":
     import uvicorn
