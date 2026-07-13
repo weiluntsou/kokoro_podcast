@@ -248,13 +248,15 @@ def extract_date_from_payload(payload):
         payload.get("content") or ""
     )
     if body_text:
+        from datetime import date as _date
+        today_str = _date.today().isoformat()  # e.g. "2026-07-13"
         body_str = str(body_text)[:2000]  # 只掃前 2000 字，避免過慢
-        # 掃出所有 YYYY-MM-DD 日期，取最新的
+        # 掃出所有 YYYY-MM-DD 日期，只保留 <= 今天的（排除未來的排程/截止日）
         all_dates = re.findall(r'\d{4}[-/]\d{2}[-/]\d{2}', body_str)
         if all_dates:
-            # 標準化並取最大值
             norm = [d.replace('/', '-') for d in all_dates
-                    if '2000' <= d[:4] <= '2099']  # 合理年份範圍
+                    if '2000' <= d[:4] <= '2099'   # 合理年份範圍
+                    and d.replace('/', '-') <= today_str]  # 非未來日期
             if norm:
                 return max(norm)
 
