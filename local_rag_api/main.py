@@ -164,11 +164,29 @@ def extract_date_from_payload(payload):
         return None
     
     import re
+    # 支援的所有日期欄位名稱
+    date_keys = [
+        "date", "created", "updated", "timestamp", "time", 
+        "created_at", "updated_at", "createdAt", "updatedAt",
+        "mtime", "ctime", "last_modified", "modified", "publish_date"
+    ]
+    
     # 1. 檢查 payload 頂層的日期欄位
-    for key in ["date", "created", "updated", "timestamp", "time", "created_at", "updated_at"]:
+    for key in date_keys:
         val = payload.get(key)
         if val:
             date_str = str(val).strip()
+            # 如果是 timestamp 數字 (例如 1718000000 或者是毫秒 1718000000000)
+            if date_str.replace('.', '').isdigit():
+                try:
+                    t = float(date_str)
+                    if t > 1000000000000: # 毫秒
+                        t = t / 1000.0
+                    if 500000000 < t < 2500000000: # 合理時間戳
+                        from datetime import datetime
+                        return datetime.fromtimestamp(t).strftime('%Y-%m-%d')
+                except Exception:
+                    pass
             # 匹配 2026-07-13 或 2026/07/13 格式
             match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', date_str)
             if match:
@@ -177,7 +195,7 @@ def extract_date_from_payload(payload):
     # 2. 檢查 metadata 內的欄位
     meta = payload.get("metadata", {})
     if isinstance(meta, dict):
-        for key in ["date", "created", "updated", "timestamp", "time", "created_at", "updated_at", "mtime", "ctime", "last_modified", "modified"]:
+        for key in date_keys:
             val = meta.get(key)
             if val:
                 date_str = str(val).strip()
@@ -236,15 +254,17 @@ def get_latest_data_date(target_collections):
         
         try:
             next_offset = None
+            total_scanned = 0
             while True:
                 scroll_res = qdrant.scroll(
                     collection_name=coll,
                     limit=1000,
                     offset=next_offset,
-                    with_payload=["title", "source", "full_path", "metadata", "date", "created", "updated", "timestamp"],
+                    with_payload=True,
                     with_vectors=False
                 )
                 points, next_offset = scroll_res
+                total_scanned += len(points)
                 for point in points:
                     date_val = extract_date_from_payload(point.payload)
                     if date_val:
@@ -252,6 +272,7 @@ def get_latest_data_date(target_collections):
                             latest_date_str = date_val
                 if not next_offset:
                     break
+            log_api_step(f"Scan collection {coll} completed: scanned {total_scanned} points, latest date so far: {latest_date_str}")
         except Exception as e:
             log_api_step(f"Error scanning collection {coll} for latest date: {e}")
             
