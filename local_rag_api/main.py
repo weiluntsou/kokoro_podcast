@@ -156,6 +156,107 @@ def extract_metadata_from_payload(payload, collection_name):
     source_path = str(source_path) if source_path is not None else ""
     return title, url, source_path
 
+def extract_date_from_payload(payload):
+    """
+    智慧提取 payload 中的日期，可用來尋找該筆記的最晚日期
+    """
+    if not payload:
+        return None
+    
+    import re
+    # 1. 檢查 payload 頂層的日期欄位
+    for key in ["date", "created", "updated", "timestamp", "time", "created_at", "updated_at"]:
+        val = payload.get(key)
+        if val:
+            date_str = str(val).strip()
+            # 匹配 2026-07-13 或 2026/07/13 格式
+            match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', date_str)
+            if match:
+                return match.group(0).replace('/', '-')
+            
+    # 2. 檢查 metadata 內的欄位
+    meta = payload.get("metadata", {})
+    if isinstance(meta, dict):
+        for key in ["date", "created", "updated", "timestamp", "time", "created_at", "updated_at", "mtime", "ctime", "last_modified", "modified"]:
+            val = meta.get(key)
+            if val:
+                date_str = str(val).strip()
+                # 如果是 timestamp 數字 (例如 1718000000 或者是毫秒 1718000000000)
+                if date_str.replace('.', '').isdigit():
+                    try:
+                        t = float(date_str)
+                        if t > 1000000000000: # 毫秒
+                            t = t / 1000.0
+                        if 500000000 < t < 2500000000: # 合理時間戳
+                            from datetime import datetime
+                            return datetime.fromtimestamp(t).strftime('%Y-%m-%d')
+                    except Exception:
+                        pass
+                match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', date_str)
+                if match:
+                    return match.group(0).replace('/', '-')
+                    
+    # 3. 從 title 中嘗試匹配日期 (例如 "2026-07-13" 或是 "20260713")
+    title = payload.get("title", "")
+    if not title and isinstance(meta, dict):
+        title = meta.get("title", "")
+    if title:
+        title_str = str(title).strip()
+        # 匹配 2026-07-13
+        match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', title_str)
+        if match:
+            return match.group(0).replace('/', '-')
+        # 匹配 20260713
+        match2 = re.search(r'\b\d{8}\b', title_str)
+        if match2:
+            s = match2.group(0)
+            return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+
+    # 4. 從 source / full_path 中嘗試匹配日期 (例如 "2026-07-13.md")
+    source_path = payload.get("source", payload.get("full_path", ""))
+    if not source_path and isinstance(meta, dict):
+        source_path = meta.get("source", meta.get("full_path", ""))
+    if source_path:
+        path_str = str(source_path).strip()
+        match = re.search(r'\d{4}[-/]\d{2}[-/]\d{2}', path_str)
+        if match:
+            return match.group(0).replace('/', '-')
+            
+    return None
+
+def get_latest_data_date(target_collections):
+    """
+    從指定的 collections 中找出最晚的資料日期
+    """
+    latest_date_str = None
+    
+    for coll in target_collections:
+        if not qdrant.collection_exists(collection_name=coll):
+            continue
+        
+        try:
+            next_offset = None
+            while True:
+                scroll_res = qdrant.scroll(
+                    collection_name=coll,
+                    limit=1000,
+                    offset=next_offset,
+                    with_payload=["title", "source", "full_path", "metadata", "date", "created", "updated", "timestamp"],
+                    with_vectors=False
+                )
+                points, next_offset = scroll_res
+                for point in points:
+                    date_val = extract_date_from_payload(point.payload)
+                    if date_val:
+                        if not latest_date_str or date_val > latest_date_str:
+                            latest_date_str = date_val
+                if not next_offset:
+                    break
+        except Exception as e:
+            log_api_step(f"Error scanning collection {coll} for latest date: {e}")
+            
+    return latest_date_str
+
 @app.get("/explore")
 async def explore_knowledge_base(
     collections: str = Query(default="hedgedoc_notes,obsidian_notes", description="逗號分隔的 collection 名稱"),
@@ -547,6 +648,7 @@ async def daily_synthesis(
                     stats[coll] = info.points_count
                 else:
                     stats[coll] = 0
+            stats["latest_date"] = get_latest_data_date(target_collections)
             cache["stats"] = stats
             cache["cached"] = True
             
@@ -603,6 +705,8 @@ async def daily_synthesis(
             stats[coll] = count
             if count > 0:
                 valid_collections.append((coll, count))
+        
+        stats["latest_date"] = get_latest_data_date(target_collections)
         
         t1 = time.time()
         log_api_step(f"Daily synthesis stats loaded in {t1-t0:.2f}s: {stats}")
@@ -824,7 +928,11 @@ async def get_stats(
             total += count
         else:
             stats[coll] = 0
-    return {"stats": stats, "total": total}
+            
+    latest_date = get_latest_data_date(target_collections)
+    stats["latest_date"] = latest_date
+    
+    return {"stats": stats, "total": total, "latest_date": latest_date}
 
 
 @app.post("/ask")

@@ -1995,7 +1995,7 @@ textarea {
 /* Stats Grid */
 .explore-stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   margin-bottom: 20px;
 }
@@ -2071,6 +2071,12 @@ textarea {
 
 #statObsidian .stat-value {
   background: linear-gradient(135deg, #8b5cf6, #a855f7);
+  -webkit-background-clip: text;
+  background-clip: text;
+}
+
+#statLatestDate .stat-value {
+  background: linear-gradient(135deg, #06b6d4, #3b82f6);
   -webkit-background-clip: text;
   background-clip: text;
 }

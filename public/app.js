@@ -1220,16 +1220,19 @@ async function loadDailySynthesis(force = false) {
             const hedgedocCount = data.stats['hedgedoc_notes'] || 0;
             const obsidianCount = data.stats['obsidian_notes'] || 0;
             const total = hedgedocCount + obsidianCount;
+            const latestDate = data.stats['latest_date'] || data['latest_date'] || '—';
             
             const totalEl = document.getElementById('statTotalValue');
             const hedgedocEl = document.getElementById('statHedgedocValue');
             const obsidianEl = document.getElementById('statObsidianValue');
+            const latestDateEl = document.getElementById('statLatestDateValue');
             
             if (totalEl) totalEl.textContent = total.toLocaleString();
             if (hedgedocEl) hedgedocEl.textContent = hedgedocCount.toLocaleString();
             if (obsidianEl) obsidianEl.textContent = obsidianCount.toLocaleString();
+            if (latestDateEl) latestDateEl.textContent = latestDate;
             
-            [totalEl, hedgedocEl, obsidianEl].forEach(el => {
+            [totalEl, hedgedocEl, obsidianEl, latestDateEl].forEach(el => {
                 if (el) {
                     el.classList.remove('animate');
                     void el.offsetWidth;
