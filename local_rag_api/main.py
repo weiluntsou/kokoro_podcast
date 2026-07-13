@@ -4,13 +4,15 @@ from pydantic import BaseModel
 from qdrant_client import QdrantClient
 from qdrant_client.models import ScrollRequest, PointIdsList
 import os
+os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+os.environ["PYTORCH_MPS_LOW_WATERMARK_RATIO"] = "0.0"
+import torch
+# 限制 PyTorch 的 CPU 執行緒數量，避免高負載搶占 CPU 資源
+torch.set_num_threads(1)
 import ollama
 from ollama import Client as OllamaClient
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434")
 ollama_client = OllamaClient(host=OLLAMA_HOST)
-import torch
-# 限制 PyTorch 的 CPU 執行緒數量，避免高負載搶占 CPU 資源
-torch.set_num_threads(1)
 from sentence_transformers import SentenceTransformer
 import json
 import urllib.request
@@ -264,9 +266,10 @@ def extract_date_from_payload(payload):
 
 def get_latest_data_date(target_collections):
     """
-    從指定的 collections 中找出最晚的資料日期
+    從指定的 collections 中找出最晚的資料日期與檔案名稱
     """
     latest_date_str = None
+    latest_file_name = None
     
     for coll in target_collections:
         if not qdrant.collection_exists(collection_name=coll):
@@ -290,13 +293,21 @@ def get_latest_data_date(target_collections):
                     if date_val:
                         if not latest_date_str or date_val > latest_date_str:
                             latest_date_str = date_val
+                            title, _, source_path = extract_metadata_from_payload(point.payload, coll)
+                            file_val = ""
+                            if source_path:
+                                file_val = os.path.basename(source_path)
+                            if not file_val and title:
+                                file_val = title
+                            latest_file_name = file_val
                 if not next_offset:
                     break
-            log_api_step(f"Scan collection {coll} completed: scanned {total_scanned} points, latest date so far: {latest_date_str}")
+            log_api_step(f"Scan collection {coll} completed: scanned {total_scanned} points, latest date so far: {latest_date_str}, file: {latest_file_name}")
         except Exception as e:
             log_api_step(f"Error scanning collection {coll} for latest date: {e}")
             
-    return latest_date_str
+    return {"date": latest_date_str, "file_name": latest_file_name}
+
 
 @app.get("/explore")
 async def explore_knowledge_base(
@@ -689,7 +700,9 @@ async def daily_synthesis(
                     stats[coll] = info.points_count
                 else:
                     stats[coll] = 0
-            stats["latest_date"] = get_latest_data_date(target_collections)
+            latest_info = get_latest_data_date(target_collections)
+            stats["latest_date"] = latest_info["date"]
+            stats["latest_file"] = latest_info["file_name"]
             cache["stats"] = stats
             cache["cached"] = True
             
@@ -747,7 +760,9 @@ async def daily_synthesis(
             if count > 0:
                 valid_collections.append((coll, count))
         
-        stats["latest_date"] = get_latest_data_date(target_collections)
+        latest_info = get_latest_data_date(target_collections)
+        stats["latest_date"] = latest_info["date"]
+        stats["latest_file"] = latest_info["file_name"]
         
         t1 = time.time()
         log_api_step(f"Daily synthesis stats loaded in {t1-t0:.2f}s: {stats}")
@@ -970,10 +985,11 @@ async def get_stats(
         else:
             stats[coll] = 0
             
-    latest_date = get_latest_data_date(target_collections)
-    stats["latest_date"] = latest_date
+    latest_info = get_latest_data_date(target_collections)
+    stats["latest_date"] = latest_info["date"]
+    stats["latest_file"] = latest_info["file_name"]
     
-    return {"stats": stats, "total": total, "latest_date": latest_date}
+    return {"stats": stats, "total": total, "latest_date": latest_info["date"], "latest_file": latest_info["file_name"]}
 
 
 @app.post("/ask")

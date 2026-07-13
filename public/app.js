@@ -1221,16 +1221,29 @@ async function loadDailySynthesis(force = false) {
             const obsidianCount = data.stats['obsidian_notes'] || 0;
             const total = hedgedocCount + obsidianCount;
             const latestDate = data.stats['latest_date'] || data['latest_date'] || '—';
+            const latestFile = data.stats['latest_file'] || data['latest_file'] || '';
             
             const totalEl = document.getElementById('statTotalValue');
             const hedgedocEl = document.getElementById('statHedgedocValue');
             const obsidianEl = document.getElementById('statObsidianValue');
             const latestDateEl = document.getElementById('statLatestDateValue');
+            const latestFileEl = document.getElementById('statLatestFileValue');
             
             if (totalEl) totalEl.textContent = total.toLocaleString();
             if (hedgedocEl) hedgedocEl.textContent = hedgedocCount.toLocaleString();
             if (obsidianEl) obsidianEl.textContent = obsidianCount.toLocaleString();
             if (latestDateEl) latestDateEl.textContent = latestDate;
+            
+            if (latestFileEl) {
+                if (latestFile) {
+                    latestFileEl.textContent = latestFile;
+                    latestFileEl.title = latestFile;
+                    latestFileEl.style.display = 'block';
+                } else {
+                    latestFileEl.textContent = '';
+                    latestFileEl.style.display = 'none';
+                }
+            }
             
             [totalEl, hedgedocEl, obsidianEl, latestDateEl].forEach(el => {
                 if (el) {
