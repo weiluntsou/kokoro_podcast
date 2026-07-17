@@ -504,12 +504,98 @@
               📝 轉存為 HedgeDoc
             </button>
             <button class="btn btn-sm btn-icon-text" id="btnRagSocialPost" style="background:linear-gradient(135deg,#8b5cf6,#ec4899); color:white; border:none;" onclick="generateSocialPost()">
-              ✍️ 社群文章
+              ✍️ RAG→Threads
+            </button>
+            <button class="btn btn-sm btn-icon-text" id="btnNotesToSocial" style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6); color:white; border:none;" onclick="openNotesToSocialPanel()">
+              📝 筆記轉文章
             </button>
           </div>
           <div class="md-preview" id="ragAnswer" style="line-height: 1.8; font-size: 16px;"></div>
-          
-          <!-- Social Post Result -->
+
+          <!-- ── 筆記轉文章：輸入面板 ── -->
+          <div id="notesToSocialPanel" style="display:none; margin-top:16px;">
+            <div class="notes-social-input-card">
+              <div class="notes-social-input-header">
+                <span style="font-size:18px;">📝</span>
+                <div>
+                  <div style="font-weight:700; font-size:14px; color:var(--text-primary);">筆記轉文章</div>
+                  <div style="font-size:12px; color:var(--text-muted);">貼上原始筆記，AI 將整理並去除 AI 味，絕不替你發明故事</div>
+                </div>
+                <button onclick="openNotesToSocialPanel()" style="margin-left:auto; background:transparent; border:none; cursor:pointer; font-size:18px; color:var(--text-muted); line-height:1;" title="關閉">×</button>
+              </div>
+
+              <!-- 平台選擇 -->
+              <div style="margin-bottom:12px;">
+                <label style="font-size:12px; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:8px;">目標平台</label>
+                <div class="notes-platform-tabs" id="notesPlatformTabs">
+                  <button class="notes-platform-btn active" data-platform="Facebook" onclick="selectNotesPlatform(this)">💬 Facebook</button>
+                  <button class="notes-platform-btn" data-platform="Blog" onclick="selectNotesPlatform(this)">📖 Blog</button>
+                  <button class="notes-platform-btn" data-platform="Threads" onclick="selectNotesPlatform(this)">🧵 Threads</button>
+                </div>
+              </div>
+
+              <!-- 筆記輸入 -->
+              <div style="margin-bottom:12px;">
+                <label for="notesInput" style="font-size:12px; font-weight:600; color:var(--text-secondary); display:block; margin-bottom:6px;">原始筆記 / 靈感碎片</label>
+                <textarea id="notesInput" placeholder="把你的原始筆記貼在這裡，例如：今天聽了 XX 分享，他說OO很重要，但我覺得ZZ才是關鍵，下次要試試..." style="width:100%; min-height:130px; resize:vertical; padding:10px 12px; border:1px solid var(--border); border-radius:8px; background:var(--bg-secondary); color:var(--text-primary); font-size:14px; font-family:inherit; line-height:1.7; box-sizing:border-box;"></textarea>
+              </div>
+
+              <div style="display:flex; justify-content:flex-end; gap:8px;">
+                <button class="btn btn-secondary btn-sm" onclick="document.getElementById('notesInput').value=''" style="font-size:13px;">清除</button>
+                <button class="btn btn-sm" id="btnGenerateNote" style="background:linear-gradient(135deg,#0ea5e9,#8b5cf6); color:white; border:none; font-size:13px; padding:6px 18px;" onclick="generateNoteSocialPost()">
+                  ✨ 生成文章草稿
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── 筆記轉文章：三欄結果 ── -->
+          <div id="notesSocialResult" style="display:none; margin-top:16px;">
+            <div class="notes-result-grid">
+
+              <!-- 左欄：作者待辦 -->
+              <div class="notes-col notes-col-todo">
+                <div class="notes-col-header">
+                  <span id="notesTodoIcon">⚠️</span>
+                  <span>作者待辦事項</span>
+                </div>
+                <div class="notes-col-body" id="notesTodoBody">
+                  <!-- 由 JS 注入 -->
+                </div>
+              </div>
+
+              <!-- 中欄：草稿 -->
+              <div class="notes-col notes-col-drafts">
+                <div class="notes-col-header">
+                  <span>📄</span>
+                  <span>草稿選擇</span>
+                  <span id="notesCoreMsg" style="margin-left:auto; font-size:11px; font-weight:400; opacity:.7; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:160px;"></span>
+                </div>
+                <!-- 草稿分頁 tabs -->
+                <div id="notesDraftTabs" style="display:flex; gap:6px; padding:10px 12px 0; flex-wrap:wrap;"></div>
+                <!-- 草稿內容 -->
+                <div class="notes-col-body" id="notesDraftBody" style="padding-top:6px;">
+                  <!-- 由 JS 注入 -->
+                </div>
+                <!-- 草稿操作 -->
+                <div id="notesDraftActions" style="padding:10px 12px; border-top:1px solid var(--border); display:flex; gap:8px; flex-wrap:wrap;"></div>
+              </div>
+
+              <!-- 右欄：幕後修正 -->
+              <div class="notes-col notes-col-corrections">
+                <div class="notes-col-header">
+                  <span>🔍</span>
+                  <span>幕後修正紀錄</span>
+                </div>
+                <div class="notes-col-body" id="notesCorrectionsBody">
+                  <!-- 由 JS 注入 -->
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- 舊版 Social Post Result (RAG→Threads，保留) -->
           <div id="ragSocialResult" style="display:none; margin-top:16px; border:1px solid var(--border); border-radius:10px; overflow:hidden;">
             <div style="padding:10px 14px; background:linear-gradient(135deg,#8b5cf622,#ec489922); display:flex; align-items:center; gap:8px;">
               <span style="font-size:16px;">✍️</span>

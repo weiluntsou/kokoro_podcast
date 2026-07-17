@@ -2836,7 +2836,255 @@ a.synthesis-note-tag:hover {
     flex-direction: column;
   }
 
+
   .synthesis-vs-divider {
     align-self: center;
   }
 }
+
+/* ═══════════════════════════════════════════════════════════
+   筆記轉文章 — Notes to Social Post UI
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 輸入卡片 ─────────────────────────────────────────── */
+.notes-social-input-card {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.06), rgba(139, 92, 246, 0.06));
+  border: 1px solid rgba(139, 92, 246, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+  animation: notesPanelIn 0.25s ease;
+}
+
+@keyframes notesPanelIn {
+  from { opacity: 0; transform: translateY(-8px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+.notes-social-input-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(139, 92, 246, 0.15);
+}
+
+/* ── 平台選擇 tabs ────────────────────────────────────── */
+.notes-platform-tabs {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.notes-platform-btn {
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: 'Inter', sans-serif;
+}
+
+.notes-platform-btn:hover {
+  border-color: rgba(139, 92, 246, 0.4);
+  color: var(--text-primary);
+  background: rgba(139, 92, 246, 0.08);
+}
+
+.notes-platform-btn.active {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.2), rgba(139, 92, 246, 0.2));
+  border-color: rgba(139, 92, 246, 0.5);
+  color: #a78bfa;
+  box-shadow: 0 0 12px rgba(139, 92, 246, 0.15);
+}
+
+/* ── 三欄結果 Grid ────────────────────────────────────── */
+.notes-result-grid {
+  display: grid;
+  grid-template-columns: 220px 1fr 200px;
+  gap: 12px;
+  align-items: start;
+  animation: notesPanelIn 0.3s ease;
+}
+
+@media (max-width: 900px) {
+  .notes-result-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── 欄位共用樣式 ────────────────────────────────────── */
+.notes-col {
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.notes-col-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+.notes-col-body {
+  padding: 12px;
+  flex: 1;
+  overflow-y: auto;
+  max-height: 400px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+/* ── 左欄：作者待辦 ─────────────────────────────────── */
+.notes-col-todo {
+  background: rgba(245, 158, 11, 0.04);
+  border-color: rgba(245, 158, 11, 0.2);
+}
+
+.notes-col-todo .notes-col-header {
+  background: rgba(245, 158, 11, 0.08);
+  color: var(--warning);
+}
+
+.notes-todo-item {
+  display: flex;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(245, 158, 11, 0.1);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.notes-todo-item:last-child {
+  border-bottom: none;
+}
+
+.notes-todo-item::before {
+  content: '→';
+  color: var(--warning);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.notes-todo-ok {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--success);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 0;
+}
+
+/* ── 中欄：草稿 ─────────────────────────────────────── */
+.notes-col-drafts {
+  background: var(--bg-card);
+  border-color: rgba(14, 165, 233, 0.2);
+}
+
+.notes-col-drafts .notes-col-header {
+  background: rgba(14, 165, 233, 0.06);
+  color: var(--info);
+}
+
+.notes-draft-tab {
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: 'Inter', sans-serif;
+}
+
+.notes-draft-tab.active {
+  background: rgba(14, 165, 233, 0.15);
+  border-color: rgba(14, 165, 233, 0.4);
+  color: #38bdf8;
+}
+
+.notes-draft-content {
+  display: none;
+  white-space: pre-wrap;
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text-primary);
+}
+
+.notes-draft-content.active {
+  display: block;
+}
+
+/* ── 右欄：幕後修正 ─────────────────────────────────── */
+.notes-col-corrections {
+  background: rgba(99, 102, 241, 0.04);
+  border-color: rgba(99, 102, 241, 0.2);
+}
+
+.notes-col-corrections .notes-col-header {
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--accent-primary);
+}
+
+.notes-correction-item {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(99, 102, 241, 0.1);
+}
+
+.notes-correction-item:last-child {
+  border-bottom: none;
+}
+
+.notes-correction-issue {
+  font-size: 11px;
+  color: var(--danger);
+  margin-bottom: 3px;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.notes-correction-fix {
+  font-size: 11px;
+  color: var(--success);
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.notes-correction-issue::before { content: '✗'; flex-shrink: 0; }
+.notes-correction-fix::before   { content: '✓'; flex-shrink: 0; }
+
+/* ── 載入中 shimmer ─────────────────────────────────── */
+.notes-loading-shimmer {
+  background: linear-gradient(90deg,
+    rgba(255,255,255,0.03) 25%,
+    rgba(255,255,255,0.07) 50%,
+    rgba(255,255,255,0.03) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 6px;
+  height: 14px;
+  margin-bottom: 8px;
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+

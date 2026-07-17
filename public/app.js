@@ -1775,8 +1775,246 @@ async function exportRagToHedgedoc() {
 }
 
 
+// ─── Notes → Social Post：筆記轉文章 ────────────────────────────
+
+// 目前選中的草稿 index
+window._notesDraftIndex = 0;
+// 儲存最後一次筆記轉文章結果
+window.lastNotesResult = null;
+
+/** 展開 / 收起筆記輸入面板 */
+function openNotesToSocialPanel() {
+    const panel = document.getElementById('notesToSocialPanel');
+    const resultDiv = document.getElementById('notesSocialResult');
+    const isVisible = panel.style.display !== 'none';
+    if (isVisible) {
+        panel.style.display = 'none';
+        // 不收起結果區，讓使用者可繼續查看
+    } else {
+        panel.style.display = 'block';
+        resultDiv.style.display = 'none'; // 重新開啟時先隱藏舊結果
+        panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        setTimeout(() => document.getElementById('notesInput').focus(), 250);
+    }
+}
+
+/** 切換目標平台 */
+function selectNotesPlatform(btn) {
+    document.querySelectorAll('.notes-platform-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+
+/** 取得目前選中的平台 */
+function getSelectedNotesPlatform() {
+    const activeBtn = document.querySelector('.notes-platform-btn.active');
+    return activeBtn ? activeBtn.dataset.platform : 'Facebook';
+}
+
+/** 主要生成函式：呼叫 /api/notes/social-post */
+async function generateNoteSocialPost() {
+    const notes = document.getElementById('notesInput').value.trim();
+    if (!notes) {
+        showToast('請輸入原始筆記內容', 'error');
+        return;
+    }
+
+    const platform = getSelectedNotesPlatform();
+    const btn = document.getElementById('btnGenerateNote');
+    const resultDiv = document.getElementById('notesSocialResult');
+
+    // ── 顯示 loading 狀態 ──
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner" style="width:12px;height:12px;border-width:2px;border-top-color:white;margin-right:6px;"></span> AI 正在整理...';
+
+    // 預先展示結果區 + shimmer
+    resultDiv.style.display = 'block';
+    document.getElementById('notesTodoBody').innerHTML = [1,2,3].map(() =>
+        '<div class="notes-loading-shimmer" style="width:90%;"></div>'
+    ).join('');
+    document.getElementById('notesDraftTabs').innerHTML = '';
+    document.getElementById('notesDraftBody').innerHTML = [1,2,3,4].map((_, i) =>
+        `<div class="notes-loading-shimmer" style="width:${85 - i*8}%;"></div>`
+    ).join('');
+    document.getElementById('notesCorrectionsBody').innerHTML = [1,2].map(() =>
+        '<div class="notes-loading-shimmer" style="width:88%;"></div>'
+    ).join('');
+
+    try {
+        const res = await fetch(`${API}/api/notes/social-post`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ notes, target_platform: platform })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '生成失敗');
+
+        window.lastNotesResult = data.result;
+        window._notesDraftIndex = 0;
+        renderNotesResult(data.result);
+
+        showToast(`✅ ${platform} 文章草稿生成完成！`, 'success');
+        resultDiv.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+
+    } catch (e) {
+        console.error('Notes social post error:', e);
+        document.getElementById('notesDraftBody').innerHTML =
+            `<p style="color:#ef4444; padding:8px;">❌ ${escapeHtml(e.message)}</p>`;
+        document.getElementById('notesTodoBody').innerHTML = '';
+        document.getElementById('notesCorrectionsBody').innerHTML = '';
+        showToast(`生成失敗：${e.message}`, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = '✨ 生成文章草稿';
+    }
+}
+
+/** 渲染三欄結果 */
+function renderNotesResult(result) {
+    const { content_analysis, ai_flavor_corrections, drafts } = result;
+
+    // ── 左欄：核心訊息 + 作者待辦 ──────────────────────────────
+    const todoBody = document.getElementById('notesTodoBody');
+    const todoIcon = document.getElementById('notesTodoIcon');
+    const questions = content_analysis.questions_for_author || [];
+
+    // 核心訊息
+    const coreEl = document.getElementById('notesCoreMsg');
+    if (coreEl && content_analysis.core_message) {
+        coreEl.textContent = content_analysis.core_message;
+        coreEl.title = content_analysis.core_message;
+    }
+
+    if (questions.length === 0) {
+        todoIcon.textContent = '✅';
+        todoBody.innerHTML = `
+            <div class="notes-todo-ok">
+                <span>✅</span> 筆記資訊充足，無需補充
+            </div>
+            ${content_analysis.core_message ? `
+            <div style="margin-top:10px; padding:10px; background:rgba(34,197,94,0.06); border-radius:8px; border:1px solid rgba(34,197,94,0.15); font-size:12px; color:var(--text-secondary); line-height:1.6;">
+                <strong style="color:var(--success); font-size:11px; display:block; margin-bottom:4px;">💡 核心訊息</strong>
+                ${escapeHtml(content_analysis.core_message)}
+            </div>` : ''}`;
+    } else {
+        todoIcon.textContent = '⚠️';
+        todoBody.innerHTML = `
+            <div style="font-size:12px; color:var(--warning); margin-bottom:8px; font-weight:600;">
+                筆記有 ${questions.length} 處需要補充：
+            </div>
+            ${questions.map(q => `<div class="notes-todo-item">${escapeHtml(q)}</div>`).join('')}
+            ${content_analysis.core_message ? `
+            <div style="margin-top:12px; padding:8px 10px; background:rgba(245,158,11,0.06); border-radius:8px; border:1px solid rgba(245,158,11,0.15); font-size:12px; color:var(--text-secondary); line-height:1.6;">
+                <strong style="color:var(--warning); font-size:11px; display:block; margin-bottom:3px;">💡 AI 識別的核心訊息</strong>
+                ${escapeHtml(content_analysis.core_message)}
+            </div>` : ''}`;
+    }
+
+    // ── 中欄：草稿 tabs + 內容 ──────────────────────────────────
+    const tabsEl = document.getElementById('notesDraftTabs');
+    const draftBody = document.getElementById('notesDraftBody');
+    const actionsEl = document.getElementById('notesDraftActions');
+
+    tabsEl.innerHTML = (drafts || []).map((d, i) => `
+        <button class="notes-draft-tab ${i === 0 ? 'active' : ''}" onclick="switchNoteDraft(${i})">
+            ${escapeHtml(d.tone_variant || `草稿 ${i + 1}`)}
+        </button>
+    `).join('');
+
+    draftBody.innerHTML = (drafts || []).map((d, i) => `
+        <div class="notes-draft-content ${i === 0 ? 'active' : ''}" id="noteDraftContent${i}">
+            ${escapeHtml(d.content || '')}
+        </div>
+    `).join('');
+
+    actionsEl.innerHTML = `
+        <button class="btn btn-secondary btn-sm" onclick="copyNoteDraft()" style="font-size:12px;">📋 複製草稿</button>
+        <button class="btn btn-sm" onclick="exportNoteDraftToHedgedoc()" style="background:linear-gradient(135deg,#10b981,#059669); color:white; border:none; font-size:12px; padding:5px 12px;">📝 存至 HedgeDoc</button>
+    `;
+
+    // ── 右欄：幕後修正 ──────────────────────────────────────────
+    const correctionsBody = document.getElementById('notesCorrectionsBody');
+    const corrections = ai_flavor_corrections || [];
+
+    if (corrections.length === 0) {
+        correctionsBody.innerHTML = `
+            <div style="color:var(--text-muted); font-size:12px; padding:8px 0; text-align:center;">
+                無明顯 AI 味需要修正
+            </div>`;
+    } else {
+        correctionsBody.innerHTML = corrections.map(c => `
+            <div class="notes-correction-item">
+                <div class="notes-correction-issue">${escapeHtml(c.detected_issue || '')}</div>
+                <div class="notes-correction-fix">${escapeHtml(c.adjustment_made || '')}</div>
+            </div>
+        `).join('');
+    }
+}
+
+/** 切換草稿 tab */
+function switchNoteDraft(index) {
+    window._notesDraftIndex = index;
+
+    // 切換 tab 樣式
+    document.querySelectorAll('.notes-draft-tab').forEach((t, i) => {
+        t.classList.toggle('active', i === index);
+    });
+
+    // 切換內容
+    document.querySelectorAll('.notes-draft-content').forEach((c, i) => {
+        c.classList.toggle('active', i === index);
+    });
+}
+
+/** 複製當前草稿 */
+function copyNoteDraft() {
+    if (!window.lastNotesResult) return;
+    const drafts = window.lastNotesResult.drafts || [];
+    const idx = window._notesDraftIndex;
+    const content = drafts[idx]?.content || '';
+    if (!content) return;
+    navigator.clipboard.writeText(content).then(() => {
+        showToast('📋 草稿已複製到剪貼簿！', 'success');
+    }).catch(() => {
+        showToast('複製失敗', 'error');
+    });
+}
+
+/** 將當前草稿存至 HedgeDoc */
+async function exportNoteDraftToHedgedoc() {
+    if (!window.lastNotesResult) return;
+    const drafts = window.lastNotesResult.drafts || [];
+    const idx = window._notesDraftIndex;
+    const draft = drafts[idx];
+    if (!draft) return;
+
+    try {
+        const platform = getSelectedNotesPlatform();
+        const toneVariant = draft.tone_variant || `草稿${idx + 1}`;
+        const mdContent = `###### tags: \`筆記轉文章\` \`${platform}\` \`${toneVariant}\`\n\n${draft.content}`;
+
+        const saveRes = await fetch(`${API}/api/hedgedoc/create`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                content: mdContent,
+                title: `${platform} 文章 - ${toneVariant}`
+            })
+        });
+        const saveData = await saveRes.json();
+        if (!saveData.success) throw new Error(saveData.error || '儲存失敗');
+
+        showToast('✅ 草稿已存至 HedgeDoc！', 'success');
+        if (saveData.note && saveData.note.url) {
+            window.open(saveData.note.url, '_blank');
+        }
+    } catch (e) {
+        showToast(`轉存失敗：${e.message}`, 'error');
+    }
+}
+
 // ─── Generate Social Post with APA Citations ─────────────────
 async function generateSocialPost() {
+
     if (!window.lastRagData) {
         showToast('請先執行查詢', 'error');
         return;

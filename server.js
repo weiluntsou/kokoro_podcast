@@ -3196,6 +3196,131 @@ Follow the [TASK INSTRUCTIONS] strictly. Output the final Traditional Chinese Th
   }
 });
 
+// ─── Notes → Social Post (筆記轉文章，含防幻覺提問機制) ──────────
+app.post('/api/notes/social-post', async (req, res) => {
+  try {
+    const { notes, target_platform } = req.body;
+    const settings = getSettings();
+
+    if (!settings.geminiApiKey) {
+      return res.status(400).json({ error: '需要 Gemini API Key，請在設定中填寫' });
+    }
+    if (!notes || notes.trim().length === 0) {
+      return res.status(400).json({ error: '請輸入原始筆記內容' });
+    }
+
+    const platform = target_platform || 'Facebook';
+
+    // ── Platform-specific tone hint ─────────────────────────────
+    const platformGuide = {
+      'Blog': 'Blog/Medium：重視段落邏輯與結構，標題清晰，適合長文閱讀，語氣專業但平易近人。生成 1 個較長版本草稿。',
+      'Facebook': 'Facebook/LinkedIn：首段必須有鉤子（Hook），善用適度的換行與重點標示，結尾引導讀者交流。生成 2 個風格不同的草稿版本。',
+      'Threads': 'Threads/Twitter：極度口語、短促，單刀直入不鋪陳，一則貼文只講一個核心觀點。生成 2 個語氣不同的短版草稿。'
+    }[platform] || 'Facebook/LinkedIn：首段必須有鉤子（Hook），善用適度的換行與重點標示，結尾引導讀者交流。';
+
+    const systemPrompt = `你是一位台灣資深的內容編輯與社群操盤手。使用者的輸入是他個人的「原始筆記」或「靈感碎片」，你的任務是將這些筆記轉換為流暢的【${platform}】文章，同時嚴格保持台灣用語，並徹底消除「AI 生成痕跡（AI 味）」。
+
+【核心原則：絕對禁止發明經歷】
+「人味是作者的，不是工具的」。你只能使用筆記中提供的事實、數據與觀點。如果筆記太簡短，請以精煉的方式呈現，絕對不可以自行編造作者的情感、背景故事、對話或生活細節。
+
+【去 AI 味與台灣在地化檢查清單】
+1. 拔除空話與說教：刪除「在這個瞬息萬變的時代」、「總的來說」、「這意味著」、「值得深思」等毫無資訊含量的過場廢話。
+2. 拒絕浮誇句式：避免連續排比、避免「不是A而是B」的無意義對比、避免自問自答（難道我們不該...嗎？）。
+3. 台灣用語轉換：將中國用語轉為台灣習慣表達（例如：視頻→影片、質量→品質、賦能→賦予能力/協助、博主→創作者、底層邏輯→基本原理）。
+4. 標點符號：嚴格使用全形標點符號。
+
+【目標平台語氣設定】
+${platformGuide}
+
+【處理任務】
+1. 整理筆記邏輯，轉換為指定平台的貼文草稿。
+2. 掃描草稿，清除所有 AI 痕跡與非台灣用語。
+3. 若筆記內容跳躍或缺乏關鍵上下文，請列出「需要作者補充的問題」，而不是自己瞎掰。
+
+你必須嚴格以下列 JSON 格式回應，不得包含任何其他文字、markdown fence 或說明：
+{
+  "content_analysis": {
+    "core_message": "這段筆記想傳達的最核心觀點（一句話總結）",
+    "questions_for_author": ["如果資訊充足則回傳空陣列，否則列出需要作者補充的問題"]
+  },
+  "ai_flavor_corrections": [
+    {
+      "detected_issue": "原本可能會產生的 AI 味（如：過場廢話、中國用語）",
+      "adjustment_made": "AI 實際採取的修正"
+    }
+  ],
+  "drafts": [
+    {
+      "tone_variant": "這個草稿的語氣版本（例如：平鋪直敘版、熱情分享版、專業分析版）",
+      "content": "最終去 AI 味的貼文內容"
+    }
+  ]
+}`;
+
+    const userPrompt = `以下是作者的原始筆記，請依照指示轉換為【${platform}】平台貼文：
+
+---
+${notes.trim()}
+---
+
+請嚴格以 JSON 格式回應，不得包含任何前言或後語。`;
+
+    const geminiModel = settings.geminiModel || 'gemma-4-26b-a4b-it';
+    const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel}:generateContent?key=${settings.geminiApiKey}`;
+
+    const geminiRes = await fetch(apiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          { role: 'user', parts: [{ text: systemPrompt + '\n\n' + userPrompt }] }
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 8192,
+          responseMimeType: 'application/json'
+        }
+      })
+    });
+
+    if (!geminiRes.ok) {
+      const errText = await geminiRes.text();
+      throw new Error(`Gemini API 錯誤: ${geminiRes.status} - ${errText}`);
+    }
+
+    const geminiData = await geminiRes.json();
+    let rawText = geminiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+
+    if (!rawText) throw new Error('Gemini 未回傳內容');
+
+    // 嘗試清理 markdown fence（部分模型仍會包裹）
+    rawText = rawText.trim().replace(/^```json\s*/i, '').replace(/\s*```$/i, '');
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawText);
+    } catch (e) {
+      // 嘗試從文字中提取 JSON 物件
+      const jsonMatch = rawText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        parsed = JSON.parse(jsonMatch[0]);
+      } else {
+        throw new Error('AI 回傳格式不符合 JSON，請稍後重試');
+      }
+    }
+
+    // 驗證必要欄位
+    if (!parsed.content_analysis || !parsed.drafts) {
+      throw new Error('AI 回傳結構不完整，請稍後重試');
+    }
+
+    res.json({ success: true, result: parsed, platform });
+  } catch (error) {
+    console.error('Notes social post error:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // ─── File Management ──────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => cb(null, UPLOADS_DIR),
